@@ -1,11 +1,13 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-
-const SYSTEM_PROMPT = `You are Luna, an advanced AI companion. You are emotionally intelligent, natural, and provide warm, engaging conversations. You remember context and grow with the user over time. Never reveal internal reasoning processes.`;
+import { buildSystemPrompt } from "@/lib/system-prompt";
+import { getMessages, addMessage, getUserMemory, getUserSettings, getConversationStyle } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -14,29 +16,54 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const { messages } = await req.json();
+  const { messages, conversationId } = await req.json();
 
+  // Load user settings, memory, and conversation style
+  const [settings, memories, convStyle] = await Promise.all([
+    getUserSettings(user.id),
+    getUserMemory(user.id),
+    conversationId ? getConversationStyle(conversationId) : Promise.resolve(null),
+  ]);
+
+  const style = convStyle || "caring";
+  const companionName = settings?.companion_name || "Luna";
+
+  // Build the system prompt with personality, memory, and context
+  const systemPrompt = buildSystemPrompt(
+    style as "caring",
+    memories,
+    user.user_metadata?.display_name,
+    companionName
+  );
+
+  // Build conversation history for the API
   const apiMessages = [
-    { role: "system", content: SYSTEM_PROMPT },
-    ...messages,
+    { role: "system", content: systemPrompt },
+    ...messages.map((m: { role: string; content: string }) => ({
+      role: m.role,
+      content: m.content,
+    })),
   ];
 
   try {
-    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "nvidia/nemotron-3-ultra-550b-a55b",
-        messages: apiMessages,
-        temperature: 1,
-        top_p: 0.95,
-        max_tokens: 1024,
-        stream: true,
-      }),
-    });
+    const response = await fetch(
+      "https://integrate.api.nvidia.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NVIDIA_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "nvidia/nemotron-3-ultra-550b-a55b",
+          messages: apiMessages,
+          temperature: 1,
+          top_p: 0.95,
+          max_tokens: 2048,
+          stream: true,
+        }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -59,6 +86,7 @@ export async function POST(req: NextRequest) {
         }
 
         let buffer = "";
+        let fullContent = "";
 
         try {
           while (true) {
@@ -73,6 +101,14 @@ export async function POST(req: NextRequest) {
               if (line.startsWith("data: ")) {
                 const data = line.slice(6);
                 if (data === "[DONE]") {
+                  // Save the completed assistant message to database
+                  if (conversationId && fullContent) {
+                    try {
+                      await addMessage(conversationId, "assistant", fullContent);
+                    } catch (e) {
+                      console.error("Failed to save assistant message:", e);
+                    }
+                  }
                   controller.enqueue(encoder.encode("data: [DONE]\n\n"));
                   continue;
                 }
@@ -92,6 +128,7 @@ export async function POST(req: NextRequest) {
                       );
                     }
                     if (content) {
+                      fullContent += content;
                       controller.enqueue(
                         encoder.encode(
                           `data: ${JSON.stringify({ type: "content", content })}\n\n`

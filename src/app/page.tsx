@@ -296,13 +296,7 @@ function CTA() {
           <div className="inline-flex items-center justify-center h-14 w-14 bg-[#03045E] mb-6">
             <SparklesIcon className="h-7 w-7 text-white" />
           </div>
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Ready to meet Luna?
-          </h2>
-          <p className="mt-4 text-muted-foreground max-w-md mx-auto">
-            Join thousands of users already having meaningful conversations
-            with their AI companion.
-          </p>
+
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <Button size="lg" render={<Link href="/signup" />} className="bg-[#0077B6] hover:bg-[#005a8c] text-white">
               Get Started Free
