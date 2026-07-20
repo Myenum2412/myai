@@ -14,9 +14,7 @@ import {
   MicOffIcon,
   Volume2Icon,
   VolumeXIcon,
-  HeartIcon,
   SmileIcon,
-  MessageSquareIcon,
   PlusIcon,
   TrashIcon,
   PinIcon,
@@ -26,6 +24,14 @@ import {
   XIcon,
   MenuIcon,
   ChevronDownIcon,
+  EditIcon,
+  CheckIcon,
+  PhoneIcon,
+  PhoneOffIcon,
+  ShieldIcon,
+  EyeIcon,
+  EyeOffIcon,
+  MessageSquareIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useRouter } from "next/navigation";
@@ -37,6 +43,7 @@ interface Message {
   reasoning?: string;
   reaction?: string | null;
   favorite?: boolean;
+  isRead?: boolean;
   created_at?: string;
   timestamp?: Date;
 }
@@ -57,16 +64,17 @@ interface UserSettings {
   voice_volume: number;
   memory_enabled: boolean;
   companion_name: string;
+  voice_profile?: string;
 }
 
 const STYLES = [
-  { id: "caring", label: "Caring", emoji: "🤗" },
-  { id: "romantic", label: "Romantic", emoji: "💕" },
-  { id: "friendly", label: "Friendly", emoji: "😊" },
-  { id: "motivational", label: "Motivational", emoji: "🔥" },
-  { id: "cheerful", label: "Cheerful", emoji: "😄" },
-  { id: "calm", label: "Calm", emoji: "🧘" },
-  { id: "humorous", label: "Humorous", emoji: "😄" },
+  { id: "caring", label: "Caring", emoji: "🤗", color: "bg-pink-100 text-pink-700" },
+  { id: "romantic", label: "Romantic", emoji: "💕", color: "bg-rose-100 text-rose-700" },
+  { id: "friendly", label: "Friendly", emoji: "😊", color: "bg-yellow-100 text-yellow-700" },
+  { id: "motivational", label: "Motivational", emoji: "🔥", color: "bg-orange-100 text-orange-700" },
+  { id: "cheerful", label: "Cheerful", emoji: "😄", color: "bg-green-100 text-green-700" },
+  { id: "calm", label: "Calm", emoji: "🧘", color: "bg-blue-100 text-blue-700" },
+  { id: "humorous", label: "Humorous", emoji: "😄", color: "bg-purple-100 text-purple-700" },
 ];
 
 const REACTIONS = [
@@ -77,11 +85,22 @@ const REACTIONS = [
   { id: "wow", emoji: "😮" },
 ];
 
+const VOICE_PROFILES = [
+  { id: "default", label: "Default", speed: 1, pitch: 1 },
+  { id: "sweet", label: "Sweet & Gentle", speed: 0.9, pitch: 1.2 },
+  { id: "energetic", label: "Energetic", speed: 1.1, pitch: 1.1 },
+  { id: "calm", label: "Calm & Soothing", speed: 0.85, pitch: 0.95 },
+  { id: "playful", label: "Playful", speed: 1.05, pitch: 1.15 },
+];
+
+// ─── Enhanced TTS Hook ───
 function useTTS() {
   const [speaking, setSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [currentVoiceProfile, setCurrentVoiceProfile] = useState("default");
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const interruptRef = useRef(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -93,47 +112,75 @@ function useTTS() {
     (text: string, speed = 1, pitch = 1, volume = 1) => {
       if (!synthRef.current || !voiceEnabled) return;
       synthRef.current.cancel();
+      interruptRef.current = false;
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = speed;
-      utterance.pitch = pitch;
+
+      // Apply voice profile
+      const profile = VOICE_PROFILES.find(p => p.id === currentVoiceProfile);
+      utterance.rate = speed * (profile?.speed || 1);
+      utterance.pitch = pitch * (profile?.pitch || 1);
       utterance.volume = volume;
 
-      // Try to find a female voice
+      // Try to find a female voice (Tamil first, then English)
       const voices = synthRef.current.getVoices();
-      const femaleVoice =
-        voices.find(
-          (v) =>
-            v.lang.startsWith("ta") ||
-            v.lang.startsWith("en") && v.name.toLowerCase().includes("female")
-        ) || voices.find((v) => v.lang.startsWith("en"));
+      const tamilVoice = voices.find(v => v.lang.startsWith("ta"));
+      const englishFemaleVoice = voices.find(
+        v => v.lang.startsWith("en") && v.name.toLowerCase().includes("female")
+      );
+      const englishVoice = voices.find(v => v.lang.startsWith("en"));
 
-      if (femaleVoice) utterance.voice = femaleVoice;
+      utterance.voice = tamilVoice || englishFemaleVoice || englishVoice || null;
 
       utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
+      utterance.onend = () => {
+        setSpeaking(false);
+        interruptRef.current = false;
+      };
+      utterance.onerror = () => {
+        setSpeaking(false);
+        interruptRef.current = false;
+      };
 
       utteranceRef.current = utterance;
       synthRef.current.speak(utterance);
     },
-    [voiceEnabled]
+    [voiceEnabled, currentVoiceProfile]
   );
+
+  const interrupt = useCallback(() => {
+    if (synthRef.current && speaking) {
+      interruptRef.current = true;
+      synthRef.current.cancel();
+      setSpeaking(false);
+    }
+  }, [speaking]);
 
   const stop = useCallback(() => {
     synthRef.current?.cancel();
     setSpeaking(false);
+    interruptRef.current = false;
   }, []);
 
   const toggleVoice = useCallback(() => {
     if (speaking) stop();
-    setVoiceEnabled((prev) => !prev);
+    setVoiceEnabled(prev => !prev);
   }, [speaking, stop]);
 
-  return { speaking, voiceEnabled, speak, stop, toggleVoice };
+  return {
+    speaking,
+    voiceEnabled,
+    currentVoiceProfile,
+    setCurrentVoiceProfile,
+    speak,
+    stop,
+    interrupt,
+    toggleVoice,
+  };
 }
 
-function useSpeechRecognition(onResult: (text: string) => void) {
+// ─── Speech Recognition Hook ───
+function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
@@ -143,14 +190,30 @@ function useSpeechRecognition(onResult: (text: string) => void) {
         window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        recognition.lang = "ta-IN"; // Tamil primary, will also pick up English
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "ta-IN";
 
         recognition.onresult = (event) => {
-          const transcript = event.results[0][0].transcript;
-          onResult(transcript);
-          setListening(false);
+          let finalTranscript = "";
+          let interimTranscript = "";
+
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+
+          if (interimTranscript && onInterim) {
+            onInterim(interimTranscript);
+          }
+
+          if (finalTranscript) {
+            onResult(finalTranscript);
+          }
         };
 
         recognition.onerror = () => setListening(false);
@@ -159,7 +222,7 @@ function useSpeechRecognition(onResult: (text: string) => void) {
         recognitionRef.current = recognition;
       }
     }
-  }, [onResult]);
+  }, [onResult, onInterim]);
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !listening) {
@@ -178,6 +241,39 @@ function useSpeechRecognition(onResult: (text: string) => void) {
   return { listening, startListening, stopListening };
 }
 
+// ─── Typing Indicator Component ───
+function TypingIndicator({ companionName }: { companionName: string }) {
+  return (
+    <div className="flex gap-3 justify-start">
+      <Avatar className="h-8 w-8 shrink-0">
+        <AvatarFallback className="bg-[#03045E] text-white">
+          <SparklesIcon className="h-4 w-4" />
+        </AvatarFallback>
+      </Avatar>
+      <div className="bg-white dark:bg-gray-800 px-4 py-3 border border-border rounded-2xl rounded-bl-sm">
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            <span className="h-2 w-2 bg-[#0077B6] rounded-full animate-bounce [animation-delay:-0.3s]" />
+            <span className="h-2 w-2 bg-[#0077B6] rounded-full animate-bounce [animation-delay:-0.15s]" />
+            <span className="h-2 w-2 bg-[#0077B6] rounded-full animate-bounce" />
+          </div>
+          <span className="text-xs text-muted-foreground ml-1">{companionName} is typing...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Read Receipt Component ───
+function ReadReceipt({ isRead }: { isRead?: boolean }) {
+  return (
+    <span className="text-[10px] text-muted-foreground/60 ml-1">
+      {isRead ? "✓✓" : "✓"}
+    </span>
+  );
+}
+
+// ─── Main Chat Interface ───
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -192,20 +288,32 @@ export function ChatInterface() {
     voice_volume: 1,
     memory_enabled: true,
     companion_name: "Luna",
+    voice_profile: "default",
   });
   const [showSidebar, setShowSidebar] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState("caring");
+  const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [voiceChatMode, setVoiceChatMode] = useState(false);
+  const [showReactions, setShowReactions] = useState<number | null>(null);
+  const [interimText, setInterimText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const { user, signOut } = useAuth();
   const tts = useTTS();
 
   const handleVoiceResult = useCallback((text: string) => {
-    setInput(text);
+    setInput(prev => prev + " " + text);
+    setInterimText("");
   }, []);
 
-  const speech = useSpeechRecognition(handleVoiceResult);
+  const handleInterim = useCallback((text: string) => {
+    setInterimText(text);
+  }, []);
+
+  const speech = useSpeechRecognition(handleVoiceResult, handleInterim);
 
   // Load conversations and settings
   useEffect(() => {
@@ -263,7 +371,7 @@ export function ChatInterface() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   // Load speech voices
   useEffect(() => {
@@ -281,7 +389,7 @@ export function ChatInterface() {
       });
       const data = await res.json();
       if (data.conversation) {
-        setConversations((prev) => [data.conversation, ...prev]);
+        setConversations(prev => [data.conversation, ...prev]);
         setActiveConversation(data.conversation.id);
         setMessages([]);
       }
@@ -293,7 +401,7 @@ export function ChatInterface() {
   const deleteConversation = async (id: string) => {
     try {
       await fetch(`/api/conversations?id=${id}`, { method: "DELETE" });
-      setConversations((prev) => prev.filter((c) => c.id !== id));
+      setConversations(prev => prev.filter(c => c.id !== id));
       if (activeConversation === id) {
         setActiveConversation(null);
         setMessages([]);
@@ -310,8 +418,8 @@ export function ChatInterface() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, pinned: !pinned }),
       });
-      setConversations((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, pinned: !pinned } : c))
+      setConversations(prev =>
+        prev.map(c => (c.id === id ? { ...c, pinned: !pinned } : c))
       );
     } catch (e) {
       console.error("Failed to toggle pin:", e);
@@ -327,8 +435,8 @@ export function ChatInterface() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: activeConversation, style }),
         });
-        setConversations((prev) =>
-          prev.map((c) =>
+        setConversations(prev =>
+          prev.map(c =>
             c.id === activeConversation ? { ...c, style } : c
           )
         );
@@ -352,11 +460,12 @@ export function ChatInterface() {
           messageId: msg.id,
         }),
       });
-      setMessages((prev) =>
+      setMessages(prev =>
         prev.map((m, i) =>
           i === messageIndex ? { ...m, reaction } : m
         )
       );
+      setShowReactions(null);
     } catch (e) {
       console.error("Failed to add reaction:", e);
     }
@@ -376,7 +485,7 @@ export function ChatInterface() {
           messageId: msg.id,
         }),
       });
-      setMessages((prev) =>
+      setMessages(prev =>
         prev.map((m, i) =>
           i === messageIndex ? { ...m, favorite: !m.favorite } : m
         )
@@ -386,8 +495,69 @@ export function ChatInterface() {
     }
   };
 
+  const startEditingMessage = (index: number) => {
+    setEditingMessageIndex(index);
+    setEditContent(messages[index].content);
+  };
+
+  const cancelEditing = () => {
+    setEditingMessageIndex(null);
+    setEditContent("");
+  };
+
+  const saveEditedMessage = async (index: number) => {
+    const msg = messages[index];
+    if (!msg.id || !editContent.trim()) return;
+
+    try {
+      await fetch("/api/conversations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: activeConversation,
+          messageId: msg.id,
+          content: editContent.trim(),
+        }),
+      });
+      setMessages(prev =>
+        prev.map((m, i) =>
+          i === index ? { ...m, content: editContent.trim() } : m
+        )
+      );
+      setEditingMessageIndex(null);
+      setEditContent("");
+    } catch (e) {
+      console.error("Failed to edit message:", e);
+    }
+  };
+
+  const toggleVoiceChatMode = () => {
+    if (voiceChatMode) {
+      speech.stopListening();
+      tts.stop();
+      setVoiceChatMode(false);
+    } else {
+      setVoiceChatMode(true);
+    }
+  };
+
+  // Auto-send in voice chat mode when user stops speaking
+  useEffect(() => {
+    if (voiceChatMode && !speech.listening && input.trim()) {
+      const timer = setTimeout(() => {
+        sendMessage();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [speech.listening, voiceChatMode]);
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
+
+    // Interrupt TTS if speaking
+    if (tts.speaking) {
+      tts.interrupt();
+    }
 
     const userMessage = input.trim();
     setInput("");
@@ -400,7 +570,7 @@ export function ChatInterface() {
 
     const newMessages: Message[] = [
       ...messages,
-      { role: "user", content: userMessage, timestamp: new Date() },
+      { role: "user", content: userMessage, timestamp: new Date(), isRead: false },
       { role: "assistant", content: "", reasoning: "" },
     ];
     setMessages(newMessages);
@@ -411,8 +581,8 @@ export function ChatInterface() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: newMessages
-            .filter((m) => m.content || m.reasoning)
-            .map((m) => ({
+            .filter(m => m.content || m.reasoning)
+            .map(m => ({
               role: m.role,
               content: m.content,
             })),
@@ -443,11 +613,17 @@ export function ChatInterface() {
           if (line.startsWith("data: ")) {
             const data = line.slice(6);
             if (data === "[DONE]") {
-              // Speak the last message with TTS
-              setMessages((prev) => {
-                const lastAssistant = [...prev]
+              // Mark user message as read
+              setMessages(prev => {
+                const updated = [...prev];
+                const lastUserIdx = updated.length - 2;
+                if (lastUserIdx >= 0 && updated[lastUserIdx].role === "user") {
+                  updated[lastUserIdx] = { ...updated[lastUserIdx], isRead: true };
+                }
+                // Speak the last assistant message with TTS
+                const lastAssistant = [...updated]
                   .reverse()
-                  .find((m) => m.role === "assistant" && m.content);
+                  .find(m => m.role === "assistant" && m.content);
                 if (lastAssistant && settings.voice_enabled) {
                   tts.speak(
                     lastAssistant.content,
@@ -456,14 +632,14 @@ export function ChatInterface() {
                     settings.voice_volume
                   );
                 }
-                return prev;
+                return updated;
               });
               continue;
             }
 
             try {
               const parsed = JSON.parse(data);
-              setMessages((prev) => {
+              setMessages(prev => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
                 if (parsed.type === "reasoning") {
@@ -481,7 +657,7 @@ export function ChatInterface() {
       }
     } catch (error) {
       console.error("Chat error:", error);
-      setMessages((prev) => {
+      setMessages(prev => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
         if (last.role === "assistant") {
@@ -501,18 +677,24 @@ export function ChatInterface() {
   };
 
   const userInitial = user?.email?.charAt(0).toUpperCase() || "U";
+  const currentStyle = STYLES.find(s => s.id === selectedStyle);
 
   return (
-    <div className="flex h-full bg-[#CAF0F8]/20 dark:bg-[#03045E]/10">
-      {/* Sidebar - Conversations */}
+    <div className="flex h-full bg-gradient-to-br from-[#CAF0F8]/20 via-white to-[#90E0EF]/10 dark:from-[#03045E]/10 dark:via-gray-900 dark:to-[#0077B6]/5">
+      {/* ─── Sidebar ─── */}
       <div
-        className={`${showSidebar ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 w-72 bg-white dark:bg-gray-900 border-r border-border transition-transform duration-200 md:relative md:translate-x-0`}
+        className={`${showSidebar ? "translate-x-0" : "-translate-x-full"} fixed inset-y-0 left-0 z-40 w-72 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-r border-border/50 transition-transform duration-300 md:relative md:translate-x-0`}
       >
         <div className="flex flex-col h-full">
           {/* Sidebar Header */}
-          <div className="p-4 border-b border-border">
+          <div className="p-4 border-b border-border/50">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-sm">Conversations</h2>
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 bg-gradient-to-br from-[#0077B6] to-[#03045E] flex items-center justify-center">
+                  <SparklesIcon className="h-4 w-4 text-white" />
+                </div>
+                <h2 className="font-semibold text-sm">{settings.companion_name}</h2>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
@@ -524,7 +706,7 @@ export function ChatInterface() {
             </div>
             <Button
               onClick={createNewConversation}
-              className="w-full bg-[#0077B6] hover:bg-[#005a8c] text-white"
+              className="w-full bg-gradient-to-r from-[#0077B6] to-[#005a8c] hover:from-[#005a8c] hover:to-[#03045E] text-white shadow-sm"
               size="sm"
             >
               <PlusIcon className="h-4 w-4 mr-2" />
@@ -535,13 +717,13 @@ export function ChatInterface() {
           {/* Conversation List */}
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-1">
-              {conversations.map((conv) => (
+              {conversations.map(conv => (
                 <div
                   key={conv.id}
-                  className={`group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${
+                  className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-all duration-200 rounded-lg ${
                     activeConversation === conv.id
-                      ? "bg-[#0077B6]/10 text-[#0077B6]"
-                      : "hover:bg-muted text-muted-foreground"
+                      ? "bg-[#0077B6]/10 text-[#0077B6] shadow-sm"
+                      : "hover:bg-muted/80 text-muted-foreground"
                   }`}
                   onClick={() => {
                     setActiveConversation(conv.id);
@@ -551,13 +733,14 @@ export function ChatInterface() {
                   {conv.pinned && (
                     <PinIcon className="h-3 w-3 shrink-0 text-[#0077B6]" />
                   )}
+                  <MessageSquareIcon className="h-3.5 w-3.5 shrink-0 opacity-50" />
                   <span className="flex-1 truncate text-sm">{conv.title}</span>
                   <div className="hidden group-hover:flex items-center gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
-                      onClick={(e) => {
+                      onClick={e => {
                         e.stopPropagation();
                         togglePin(conv.id, conv.pinned);
                       }}
@@ -572,7 +755,7 @@ export function ChatInterface() {
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 text-destructive"
-                      onClick={(e) => {
+                      onClick={e => {
                         e.stopPropagation();
                         deleteConversation(conv.id);
                       }}
@@ -583,18 +766,33 @@ export function ChatInterface() {
                 </div>
               ))}
               {conversations.length === 0 && (
-                <p className="text-center text-sm text-muted-foreground py-8">
-                  No conversations yet. Start chatting!
-                </p>
+                <div className="text-center py-12">
+                  <MessageSquareIcon className="h-8 w-8 mx-auto text-muted-foreground/30 mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    No conversations yet
+                  </p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">
+                    Start chatting with {settings.companion_name}!
+                  </p>
+                </div>
               )}
             </div>
           </ScrollArea>
 
           {/* Sidebar Footer */}
-          <div className="p-4 border-t border-border space-y-2">
+          <div className="p-4 border-t border-border/50 space-y-1">
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="w-full justify-start text-sm"
+              size="sm"
+              onClick={() => setShowPrivacy(true)}
+            >
+              <ShieldIcon className="h-4 w-4 mr-2" />
+              Privacy
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-sm"
               size="sm"
               onClick={() => setShowSettings(true)}
             >
@@ -603,7 +801,7 @@ export function ChatInterface() {
             </Button>
             <Button
               variant="ghost"
-              className="w-full justify-start"
+              className="w-full justify-start text-sm"
               size="sm"
               onClick={handleLogout}
             >
@@ -614,10 +812,10 @@ export function ChatInterface() {
         </div>
       </div>
 
-      {/* Main Chat Area */}
+      {/* ─── Main Chat Area ─── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Chat Header */}
-        <div className="border-b bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm p-4">
+        <div className="border-b bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl p-3 md:p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Button
@@ -630,26 +828,44 @@ export function ChatInterface() {
               </Button>
               <div className="relative">
                 <Avatar className="h-10 w-10">
-                  <AvatarFallback className="bg-[#03045E] text-white">
+                  <AvatarFallback className="bg-gradient-to-br from-[#0077B6] to-[#03045E] text-white">
                     <SparklesIcon className="h-5 w-5" />
                   </AvatarFallback>
                 </Avatar>
-                <span className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 border-2 border-white dark:border-gray-900" />
+                <span className="absolute bottom-0 right-0 h-3 w-3 bg-green-500 border-2 border-white dark:border-gray-900 rounded-full" />
               </div>
               <div>
-                <h1 className="font-semibold text-foreground">
+                <h1 className="font-semibold text-foreground text-sm md:text-base">
                   {settings.companion_name}
                 </h1>
-                <p className="text-xs text-green-500">Online</p>
+                <p className="text-xs text-green-500 flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
+                  Online
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 md:gap-2">
+              {/* Voice Chat Mode Toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 ${voiceChatMode ? "text-[#0077B6] bg-[#0077B6]/10" : ""}`}
+                onClick={toggleVoiceChatMode}
+                title={voiceChatMode ? "Exit voice chat" : "Voice chat mode"}
+              >
+                {voiceChatMode ? (
+                  <PhoneOffIcon className="h-4 w-4" />
+                ) : (
+                  <PhoneIcon className="h-4 w-4" />
+                )}
+              </Button>
+
               {/* Voice Toggle */}
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8"
+                className={`h-8 w-8 ${!tts.voiceEnabled ? "text-muted-foreground" : ""}`}
                 onClick={tts.toggleVoice}
                 title={tts.voiceEnabled ? "Mute voice" : "Enable voice"}
               >
@@ -662,43 +878,36 @@ export function ChatInterface() {
 
               {/* Style Selector */}
               <div className="relative group">
-                <Button variant="ghost" size="sm" className="text-xs">
-                  {STYLES.find((s) => s.id === selectedStyle)?.emoji}{" "}
-                  {STYLES.find((s) => s.id === selectedStyle)?.label}
-                  <ChevronDownIcon className="h-3 w-3 ml-1" />
+                <Button variant="ghost" size="sm" className="text-xs gap-1.5">
+                  <span>{currentStyle?.emoji}</span>
+                  <span className="hidden sm:inline">{currentStyle?.label}</span>
+                  <ChevronDownIcon className="h-3 w-3" />
                 </Button>
-                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-border shadow-lg rounded-lg py-1 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all min-w-[140px]">
-                  {STYLES.map((style) => (
+                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-border/50 shadow-xl rounded-xl py-1.5 z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 min-w-[160px]">
+                  {STYLES.map(style => (
                     <button
                       key={style.id}
-                      className={`w-full px-3 py-1.5 text-left text-sm hover:bg-muted flex items-center gap-2 ${
-                        selectedStyle === style.id ? "text-[#0077B6] font-medium" : ""
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-muted/80 flex items-center gap-2 transition-colors ${
+                        selectedStyle === style.id ? "text-[#0077B6] font-medium bg-[#0077B6]/5" : ""
                       }`}
                       onClick={() => updateStyle(style.id)}
                     >
-                      <span>{style.emoji}</span>
+                      <span className="text-base">{style.emoji}</span>
                       <span>{style.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* User Email */}
-              {user && (
-                <span className="text-sm text-muted-foreground hidden sm:block">
-                  {user.email}
-                </span>
-              )}
             </div>
           </div>
         </div>
 
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+        <ScrollArea className="flex-1 p-3 md:p-4" ref={scrollRef}>
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.length === 0 && (
-              <div className="text-center py-20">
-                <div className="inline-flex items-center justify-center h-16 w-16 bg-[#03045E] mb-4">
+              <div className="text-center py-16 md:py-20">
+                <div className="inline-flex items-center justify-center h-16 w-16 bg-gradient-to-br from-[#0077B6] to-[#03045E] mb-4 rounded-2xl shadow-lg">
                   <SparklesIcon className="h-8 w-8 text-white" />
                 </div>
                 <h2 className="text-xl font-semibold text-foreground mb-2">
@@ -706,27 +915,30 @@ export function ChatInterface() {
                   {user?.user_metadata?.display_name
                     ? `, ${user.user_metadata.display_name}`
                     : ""}{" "}
-                 ! I&apos;m {settings.companion_name}
+                  ! I&apos;m {settings.companion_name}
                 </h2>
-                <p className="text-muted-foreground max-w-md mx-auto">
-                  Your AI companion powered by advanced reasoning. I&apos;m here
+                <p className="text-muted-foreground max-w-md mx-auto text-sm md:text-base">
+                  Your AI companion with advanced emotional intelligence. I&apos;m here
                   to chat, listen, and grow with you. How are you feeling today?
                 </p>
                 <div className="mt-6 flex flex-wrap justify-center gap-2">
-                  {["How are you?", "Tell me about yourself", "Let's talk"].map(
-                    (suggestion) => (
-                      <Button
-                        key={suggestion}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setInput(suggestion);
-                        }}
-                      >
-                        {suggestion}
-                      </Button>
-                    )
-                  )}
+                  {[
+                    "How are you?",
+                    "Tell me about yourself",
+                    "Let's talk",
+                    "I'm feeling down",
+                    "What's up?",
+                  ].map(suggestion => (
+                    <Button
+                      key={suggestion}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs md:text-sm"
+                      onClick={() => setInput(suggestion)}
+                    >
+                      {suggestion}
+                    </Button>
+                  ))}
                 </div>
               </div>
             )}
@@ -740,7 +952,7 @@ export function ChatInterface() {
               >
                 {message.role === "assistant" && (
                   <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="bg-[#03045E] text-white">
+                    <AvatarFallback className="bg-gradient-to-br from-[#0077B6] to-[#03045E] text-white">
                       <SparklesIcon className="h-4 w-4" />
                     </AvatarFallback>
                   </Avatar>
@@ -753,7 +965,7 @@ export function ChatInterface() {
                 >
                   {/* Reasoning */}
                   {message.reasoning && (
-                    <div className="mb-2 p-3 bg-[#CAF0F8]/30 dark:bg-[#03045E]/20 border border-[#90E0EF]/30">
+                    <div className="mb-2 p-3 bg-[#CAF0F8]/30 dark:bg-[#03045E]/20 border border-[#90E0EF]/30 rounded-lg">
                       <div className="flex items-center gap-2 text-xs text-[#0077B6] mb-1">
                         <BrainIcon className="h-3 w-3" />
                         <span>Thinking...</span>
@@ -766,36 +978,68 @@ export function ChatInterface() {
 
                   {/* Message Bubble */}
                   <div
-                    className={`px-4 py-2 ${
+                    className={`px-4 py-2.5 ${
                       message.role === "user"
-                        ? "bg-[#0077B6] text-white"
-                        : "bg-white dark:bg-gray-800 text-foreground border border-border"
+                        ? "bg-[#0077B6] text-white rounded-2xl rounded-br-sm"
+                        : "bg-white dark:bg-gray-800 text-foreground border border-border/50 rounded-2xl rounded-bl-sm shadow-sm"
                     }`}
                   >
-                    <p className="whitespace-pre-wrap">{message.content}</p>
+                    {editingMessageIndex === index ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editContent}
+                          onChange={e => setEditContent(e.target.value)}
+                          className="flex-1 h-8 text-sm"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") saveEditedMessage(index);
+                            if (e.key === "Escape") cancelEditing();
+                          }}
+                          autoFocus
+                        />
+                        <Button
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => saveEditedMessage(index)}
+                        >
+                          <CheckIcon className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={cancelEditing}
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap text-sm md:text-base">{message.content}</p>
+                    )}
                   </div>
 
                   {/* Message Actions */}
-                  {message.role === "assistant" && message.content && (
-                    <div className="flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {message.role === "assistant" && message.content && editingMessageIndex !== index && (
+                    <div className="flex items-center gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {/* Reactions */}
-                      {REACTIONS.map((r) => (
+                      {REACTIONS.map(r => (
                         <Button
                           key={r.id}
                           variant="ghost"
                           size="icon"
-                          className={`h-6 w-6 ${message.reaction === r.id ? "bg-[#0077B6]/10" : ""}`}
+                          className={`h-6 w-6 transition-transform hover:scale-125 ${message.reaction === r.id ? "bg-[#0077B6]/10 scale-110" : ""}`}
                           onClick={() => addReaction(index, r.id)}
                         >
                           <span className="text-xs">{r.emoji}</span>
                         </Button>
                       ))}
 
+                      <div className="w-px h-4 bg-border mx-1" />
+
                       {/* Favorite */}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className={`h-6 w-6 ${message.favorite ? "text-yellow-500" : ""}`}
+                        className={`h-6 w-6 transition-colors ${message.favorite ? "text-yellow-500" : ""}`}
                         onClick={() => toggleFavorite(index)}
                       >
                         <StarIcon
@@ -822,11 +1066,26 @@ export function ChatInterface() {
                     </div>
                   )}
 
+                  {/* User message actions */}
+                  {message.role === "user" && message.content && editingMessageIndex !== index && (
+                    <div className="flex items-center gap-1 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => startEditingMessage(index)}
+                      >
+                        <EditIcon className="h-3 w-3" />
+                      </Button>
+                      <ReadReceipt isRead={message.isRead} />
+                    </div>
+                  )}
+
                   {/* Reaction Display */}
                   {message.reaction && (
                     <div className="mt-1">
-                      <span className="text-sm bg-white dark:bg-gray-800 border border-border px-1.5 py-0.5">
-                        {REACTIONS.find((r) => r.id === message.reaction)?.emoji}
+                      <span className="text-sm bg-white dark:bg-gray-800 border border-border/50 px-1.5 py-0.5 rounded-full shadow-sm">
+                        {REACTIONS.find(r => r.id === message.reaction)?.emoji}
                       </span>
                     </div>
                   )}
@@ -843,30 +1102,37 @@ export function ChatInterface() {
             ))}
 
             {/* Typing Indicator */}
-            {isLoading &&
-              messages[messages.length - 1]?.content === "" && (
-                <div className="flex gap-3">
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="bg-[#03045E] text-white">
-                      <SparklesIcon className="h-4 w-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="bg-white dark:bg-gray-800 px-4 py-3 border border-border">
-                    <div className="flex gap-1">
-                      <span className="h-2 w-2 bg-[#0077B6] animate-bounce [animation-delay:-0.3s]" />
-                      <span className="h-2 w-2 bg-[#0077B6] animate-bounce [animation-delay:-0.15s]" />
-                      <span className="h-2 w-2 bg-[#0077B6] animate-bounce" />
-                    </div>
-                  </div>
-                </div>
-              )}
+            {isLoading && messages[messages.length - 1]?.content === "" && (
+              <TypingIndicator companionName={settings.companion_name} />
+            )}
           </div>
         </ScrollArea>
 
+        {/* Voice Chat Mode Overlay */}
+        {voiceChatMode && (
+          <div className="border-t bg-gradient-to-r from-[#0077B6]/5 to-[#03045E]/5 p-4">
+            <div className="max-w-3xl mx-auto flex items-center justify-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+                Voice chat active — speak naturally
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={toggleVoiceChatMode}
+                className="text-xs"
+              >
+                <PhoneOffIcon className="h-3 w-3 mr-1" />
+                End Voice Chat
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Input Area */}
-        <div className="border-t bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm p-4">
+        <div className="border-t bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl p-3 md:p-4">
           <form
-            onSubmit={(e) => {
+            onSubmit={e => {
               e.preventDefault();
               sendMessage();
             }}
@@ -877,7 +1143,9 @@ export function ChatInterface() {
               type="button"
               variant="ghost"
               size="icon"
-              className={`h-10 w-10 shrink-0 ${speech.listening ? "text-[#0077B6]" : ""}`}
+              className={`h-10 w-10 shrink-0 transition-colors ${
+                speech.listening ? "text-[#0077B6] bg-[#0077B6]/10" : ""
+              }`}
               onClick={speech.listening ? speech.stopListening : speech.startListening}
             >
               {speech.listening ? (
@@ -887,13 +1155,24 @@ export function ChatInterface() {
               )}
             </Button>
 
-            <Input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={`Message ${settings.companion_name}...`}
-              disabled={isLoading}
-              className="flex-1"
-            />
+            <div className="flex-1 relative">
+              <Input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                placeholder={
+                  speech.listening
+                    ? `Listening... ${interimText}`
+                    : `Message ${settings.companion_name}...`
+                }
+                disabled={isLoading}
+                className="flex-1 pr-10"
+              />
+              {interimText && (
+                <div className="absolute right-10 top-1/2 -translate-y-1/2 text-xs text-muted-foreground animate-pulse">
+                  <SmileIcon className="h-3 w-3 inline" />
+                </div>
+              )}
+            </div>
 
             {/* Stop Speaking */}
             {tts.speaking && (
@@ -912,7 +1191,7 @@ export function ChatInterface() {
               type="submit"
               disabled={isLoading || !input.trim()}
               size="icon"
-              className="h-10 w-10 shrink-0 bg-[#0077B6] hover:bg-[#005a8c] text-white"
+              className="h-10 w-10 shrink-0 bg-gradient-to-r from-[#0077B6] to-[#005a8c] hover:from-[#005a8c] hover:to-[#03045E] text-white shadow-sm transition-all"
             >
               <SendIcon className="h-4 w-4" />
             </Button>
@@ -920,10 +1199,10 @@ export function ChatInterface() {
         </div>
       </div>
 
-      {/* Settings Modal */}
+      {/* ─── Settings Modal ─── */}
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white dark:bg-gray-900 border border-border w-full max-w-md mx-4 p-6 space-y-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 border border-border/50 w-full max-w-md mx-4 p-6 space-y-6 rounded-2xl shadow-2xl max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Settings</h2>
               <Button
@@ -940,8 +1219,8 @@ export function ChatInterface() {
               <label className="text-sm font-medium">Companion Name</label>
               <Input
                 value={settings.companion_name}
-                onChange={(e) =>
-                  setSettings((prev) => ({
+                onChange={e =>
+                  setSettings(prev => ({
                     ...prev,
                     companion_name: e.target.value,
                   }))
@@ -959,20 +1238,48 @@ export function ChatInterface() {
             {/* Voice Settings */}
             <div className="space-y-3">
               <h3 className="text-sm font-medium">Voice Settings</h3>
+
+              {/* Voice Profile */}
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">Voice Profile</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {VOICE_PROFILES.map(profile => (
+                    <Button
+                      key={profile.id}
+                      variant={settings.voice_profile === profile.id ? "default" : "outline"}
+                      size="sm"
+                      className={`text-xs ${settings.voice_profile === profile.id ? "bg-[#0077B6] text-white" : ""}`}
+                      onClick={async () => {
+                        setSettings(prev => ({
+                          ...prev,
+                          voice_profile: profile.id,
+                        }));
+                        await fetch("/api/settings", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ ...settings, voice_profile: profile.id }),
+                        });
+                      }}
+                    >
+                      {profile.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Voice Enabled
-                  </span>
+                  <span className="text-sm text-muted-foreground">Voice Enabled</span>
                   <Button
                     variant={settings.voice_enabled ? "default" : "outline"}
                     size="sm"
                     onClick={() =>
-                      setSettings((prev) => ({
+                      setSettings(prev => ({
                         ...prev,
                         voice_enabled: !prev.voice_enabled,
                       }))
                     }
+                    className={settings.voice_enabled ? "bg-[#0077B6] text-white" : ""}
                   >
                     {settings.voice_enabled ? "On" : "Off"}
                   </Button>
@@ -989,13 +1296,13 @@ export function ChatInterface() {
                     max="2"
                     step="0.1"
                     value={settings.voice_speed}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
+                    onChange={e =>
+                      setSettings(prev => ({
                         ...prev,
                         voice_speed: parseFloat(e.target.value),
                       }))
                     }
-                    className="w-full"
+                    className="w-full accent-[#0077B6]"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1010,13 +1317,13 @@ export function ChatInterface() {
                     max="2"
                     step="0.1"
                     value={settings.voice_pitch}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
+                    onChange={e =>
+                      setSettings(prev => ({
                         ...prev,
                         voice_pitch: parseFloat(e.target.value),
                       }))
                     }
-                    className="w-full"
+                    className="w-full accent-[#0077B6]"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1031,13 +1338,13 @@ export function ChatInterface() {
                     max="1"
                     step="0.1"
                     value={settings.voice_volume}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
+                    onChange={e =>
+                      setSettings(prev => ({
                         ...prev,
                         voice_volume: parseFloat(e.target.value),
                       }))
                     }
-                    className="w-full"
+                    className="w-full accent-[#0077B6]"
                   />
                 </div>
               </div>
@@ -1055,11 +1362,12 @@ export function ChatInterface() {
                 variant={settings.memory_enabled ? "default" : "outline"}
                 size="sm"
                 onClick={() =>
-                  setSettings((prev) => ({
+                  setSettings(prev => ({
                     ...prev,
                     memory_enabled: !prev.memory_enabled,
                   }))
                 }
+                className={settings.memory_enabled ? "bg-[#0077B6] text-white" : ""}
               >
                 {settings.memory_enabled ? "On" : "Off"}
               </Button>
@@ -1067,7 +1375,7 @@ export function ChatInterface() {
 
             {/* Save */}
             <Button
-              className="w-full bg-[#0077B6] hover:bg-[#005a8c] text-white"
+              className="w-full bg-gradient-to-r from-[#0077B6] to-[#005a8c] hover:from-[#005a8c] hover:to-[#03045E] text-white"
               onClick={async () => {
                 await fetch("/api/settings", {
                   method: "PUT",
@@ -1083,10 +1391,125 @@ export function ChatInterface() {
         </div>
       )}
 
+      {/* ─── Privacy Modal ─── */}
+      {showPrivacy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 border border-border/50 w-full max-w-md mx-4 p-6 space-y-6 rounded-2xl shadow-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <ShieldIcon className="h-5 w-5" />
+                Privacy & Safety
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowPrivacy(false)}
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <h3 className="text-sm font-medium mb-2">Data Protection</h3>
+                <ul className="text-xs text-muted-foreground space-y-1.5">
+                  <li className="flex items-start gap-2">
+                    <CheckIcon className="h-3 w-3 mt-0.5 text-green-500 shrink-0" />
+                    Conversations are encrypted and stored securely
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckIcon className="h-3 w-3 mt-0.5 text-green-500 shrink-0" />
+                    Your data is never used for AI training
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckIcon className="h-3 w-3 mt-0.5 text-green-500 shrink-0" />
+                    You can delete all data at any time
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <h3 className="text-sm font-medium mb-2">Memory Controls</h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {settings.memory_enabled
+                    ? "Memory is ON — I remember things about you across conversations."
+                    : "Memory is OFF — I won't remember details between conversations."}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={async () => {
+                    if (confirm("Are you sure you want to clear all memory? This cannot be undone.")) {
+                      await fetch("/api/memory", { method: "DELETE" });
+                      setSettings(prev => ({ ...prev, memory_enabled: false }));
+                    }
+                  }}
+                >
+                  <TrashIcon className="h-3 w-3 mr-1" />
+                  Clear All Memory
+                </Button>
+              </div>
+
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <h3 className="text-sm font-medium mb-2">Conversation History</h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  All conversations are stored in your account. You can delete individual conversations or clear everything.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      if (confirm("Delete ALL conversations? This cannot be undone.")) {
+                        conversations.forEach(c => deleteConversation(c.id));
+                      }
+                    }}
+                  >
+                    <TrashIcon className="h-3 w-3 mr-1" />
+                    Clear All Chats
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-4 bg-muted/50 rounded-lg">
+                <h3 className="text-sm font-medium mb-2">Safety Boundaries</h3>
+                <ul className="text-xs text-muted-foreground space-y-1.5">
+                  <li className="flex items-start gap-2">
+                    <ShieldIcon className="h-3 w-3 mt-0.5 text-[#0077B6] shrink-0" />
+                    I will never pretend to be a real human
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ShieldIcon className="h-3 w-3 mt-0.5 text-[#0077B6] shrink-0" />
+                    I maintain healthy emotional boundaries
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ShieldIcon className="h-3 w-3 mt-0.5 text-[#0077B6] shrink-0" />
+                    I encourage professional help when needed
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <ShieldIcon className="h-3 w-3 mt-0.5 text-[#0077B6] shrink-0" />
+                    I refuse harmful or abusive requests
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <Button
+              className="w-full bg-[#0077B6] hover:bg-[#005a8c] text-white"
+              onClick={() => setShowPrivacy(false)}
+            >
+              Got it
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Sidebar Overlay */}
       {showSidebar && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden"
           onClick={() => setShowSidebar(false)}
         />
       )}
