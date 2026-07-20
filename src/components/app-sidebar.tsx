@@ -148,7 +148,7 @@ const data = {
     },
     {
       title: "AI Chatbot",
-      url: "/",
+      url: "/chat",
       icon: (
         <MessageSquareIcon
         />
@@ -156,7 +156,7 @@ const data = {
       items: [
         {
           title: "Chat with Luna",
-          url: "/",
+          url: "/chat",
         },
         {
           title: "Chatbot Overview",

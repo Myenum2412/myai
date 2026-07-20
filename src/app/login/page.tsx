@@ -1,23 +1,27 @@
-"use client"
+"use client";
 
-import { LoginForm } from "@/components/login-form"
-import { SparklesIcon } from "lucide-react"
+import { Suspense } from "react";
+import { LoginForm, LoginFormSkeleton } from "@/components/login-form";
+import { SparklesIcon } from "lucide-react";
+import Link from "next/link";
 
-export default function LoginPage() {
+function LoginPageInner() {
   return (
     <div className="grid min-h-svh lg:grid-cols-2">
       <div className="flex flex-col gap-4 p-6 md:p-10">
         <div className="flex justify-center gap-2 md:justify-start">
-          <a href="/" className="flex items-center gap-2 font-medium">
+          <Link href="/" className="flex items-center gap-2 font-medium">
             <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-pink-400 to-purple-500 text-white">
               <SparklesIcon className="size-4" />
             </div>
             Luna AI
-          </a>
+          </Link>
         </div>
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-xs">
-            <LoginForm />
+            <Suspense fallback={<LoginFormSkeleton />}>
+              <LoginForm />
+            </Suspense>
           </div>
         </div>
       </div>
@@ -37,5 +41,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
-  )
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageInner />
+    </Suspense>
+  );
 }

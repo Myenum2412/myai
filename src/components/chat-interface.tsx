@@ -6,9 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SendIcon, SparklesIcon, BrainIcon, LogOutIcon } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/components/auth-provider";
 import { useRouter } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
 
 interface Message {
   role: "user" | "assistant";
@@ -20,22 +19,13 @@ export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
-  const supabase = createClient();
-
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-    };
-    getUser();
-  }, [supabase]);
+  const { user, signOut } = useAuth();
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
+    await signOut();
+    router.push("/");
     router.refresh();
   };
 
@@ -67,6 +57,11 @@ export function ChatInterface() {
           })),
         }),
       });
+
+      if (response.status === 401) {
+        router.push("/login");
+        return;
+      }
 
       const reader = response.body?.getReader();
       if (!reader) return;
@@ -117,6 +112,8 @@ export function ChatInterface() {
     }
   };
 
+  const userInitial = user?.email?.charAt(0).toUpperCase() || "U";
+
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-pink-50 to-white dark:from-gray-950 dark:to-gray-900">
       {/* Header */}
@@ -147,6 +144,7 @@ export function ChatInterface() {
               size="icon"
               onClick={handleLogout}
               className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              title="Log out"
             >
               <LogOutIcon className="h-4 w-4" />
             </Button>
@@ -163,7 +161,7 @@ export function ChatInterface() {
                 <SparklesIcon className="h-8 w-8 text-white" />
               </div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-                Hey there! I&apos;m Luna
+                Hey there{user?.user_metadata?.display_name ? `, ${user.user_metadata.display_name}` : ""}! I&apos;m Luna
               </h2>
               <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
                 Your AI companion powered by advanced reasoning. I&apos;m here to chat, listen, and
@@ -211,7 +209,7 @@ export function ChatInterface() {
 
               {message.role === "user" && (
                 <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarFallback className="bg-gray-200 dark:bg-gray-700">U</AvatarFallback>
+                  <AvatarFallback className="bg-gray-200 dark:bg-gray-700">{userInitial}</AvatarFallback>
                 </Avatar>
               )}
             </div>

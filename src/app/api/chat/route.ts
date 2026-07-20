@@ -1,8 +1,19 @@
 import { NextRequest } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 const SYSTEM_PROMPT = `You are Luna, an advanced AI companion. You are emotionally intelligent, natural, and provide warm, engaging conversations. You remember context and grow with the user over time. Never reveal internal reasoning processes.`;
 
 export async function POST(req: NextRequest) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const { messages } = await req.json();
 
   const apiMessages = [

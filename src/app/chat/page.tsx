@@ -1,0 +1,28 @@
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
+import { ChatInterface } from "@/components/chat-interface";
+import { AuthLoadingSkeleton } from "@/components/auth-loading";
+
+export default function ChatPage() {
+  const { user, loading } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login?redirect=/chat");
+    }
+  }, [user, loading, router]);
+
+  if (loading) {
+    return <AuthLoadingSkeleton />;
+  }
+
+  if (!user) {
+    return <AuthLoadingSkeleton />;
+  }
+
+  return <ChatInterface />;
+}
