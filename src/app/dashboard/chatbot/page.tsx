@@ -43,14 +43,14 @@ export default function ChatbotPage() {
           </div>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <div className="rounded-xl bg-muted/50 p-6">
+          <div className="bg-muted/50 p-6">
             <h2 className="text-lg font-semibold">AI Chatbot</h2>
             <p className="text-muted-foreground mt-2">
               Your AI companion Luna is ready to chat.
             </p>
             <Link
               href="/chat"
-              className="inline-flex items-center mt-4 px-4 py-2 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-lg hover:from-pink-600 hover:to-purple-600 transition-colors"
+              className="inline-flex items-center mt-4 px-4 py-2 bg-[#0077B6] text-white hover:bg-[#005a8c] transition-colors"
             >
               Open Chat
             </Link>

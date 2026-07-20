@@ -115,7 +115,7 @@ export function ChatInterface() {
   const userInitial = user?.email?.charAt(0).toUpperCase() || "U";
 
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-b from-pink-50 to-white dark:from-gray-950 dark:to-gray-900">
+    <div className="flex flex-col h-full bg-gradient-to-b from-pink-50 to-white dark:from-gray-950 dark:to-gray-900">
       {/* Header */}
       <div className="border-b bg-white/80 backdrop-blur-sm dark:bg-gray-900/80 p-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
