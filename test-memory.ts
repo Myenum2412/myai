@@ -1,6 +1,4 @@
-import { NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { upsertMemory, getUserMemory, deleteMemory } from "@/lib/db";
+// Test memory extraction patterns
 
 // English memory extraction patterns
 const ENGLISH_PATTERNS = {
@@ -92,11 +90,9 @@ const EXPLICIT_PATTERNS = [
   /(?:enna pathi|en pathi)\s+(?:.+?)?\s*(?:记住|remember|solli irukken)/gi,
 ];
 
-function extractMemoriesFromText(
-  text: string
-): Array<{ category: string; key: string; value: string; importance: number }> {
-  const memories: Array<{ category: string; key: string; value: string; importance: number }> = [];
-  const seen = new Set<string>();
+function extractMemoriesFromText(text: string) {
+  const memories = [];
+  const seen = new Set();
 
   // Extract from English patterns
   for (const [category, patterns] of Object.entries(ENGLISH_PATTERNS)) {
@@ -109,12 +105,7 @@ function extractMemoriesFromText(
           const key = `${category}_${value.toLowerCase().slice(0, 50)}`;
           if (!seen.has(key)) {
             seen.add(key);
-            let importance = 5;
-            if (category === "date") importance = 8;
-            if (category === "goal") importance = 7;
-            if (category === "preference") importance = 6;
-            if (category === "milestone") importance = 9;
-            memories.push({ category, key, value, importance });
+            memories.push({ category, key, value });
           }
         }
       }
@@ -132,13 +123,23 @@ function extractMemoriesFromText(
           const key = `ta_${category}_${value.toLowerCase().slice(0, 50)}`;
           if (!seen.has(key)) {
             seen.add(key);
-            let importance = 5;
-            if (category === "date") importance = 8;
-            if (category === "goal") importance = 7;
-            if (category === "preference") importance = 6;
-            if (category === "milestone") importance = 9;
-            memories.push({ category, key, value, importance });
+            memories.push({ category, key, value });
           }
+        }
+      }
+    }
+  }
+
+  // Check for explicit memory requests
+  for (const pattern of EXPLICIT_PATTERNS) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const value = match[1]?.trim();
+      if (value && value.length > 2) {
+        const key = `explicit_${value.toLowerCase().slice(0, 50)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          memories.push({ category: "fact", key, value });
         }
       }
     }
@@ -147,132 +148,47 @@ function extractMemoriesFromText(
   return memories;
 }
 
-// GET /api/memory - Get user memory
-export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+// Test cases
+const testCases = [
+  // English tests
+  "My name is Kumar and I live in Chennai.",
+  "I work at Google as a software engineer.",
+  "My birthday is on January 15th.",
+  "I really like playing cricket.",
+  "My favorite food is biryani.",
+  "I want to become a pilot someday.",
+  "I'm from Madurai originally.",
+  "I'm a student at IIT Madras.",
+  "Remember that I have a meeting tomorrow.",
+  "My hobby is reading novels.",
+  
+  // Tanglish tests
+  "En per Kumaran.",
+  "Naan Chennai-la irukken.",
+  "Enakku cricket romba pudikkum.",
+  "En birthday January 15.",
+  "Naan pilot aaganum-nu aasai padukuren.",
+  "En favorite food biryani.",
+  "Naan Madurai-la irundhu vandhen.",
+  "Naan student IIT Madras-la.",
+  "Yaad vechukonga naan meeting vekkuren naalaikku.",
+  "En hobby novels padikkarthu.",
+  
+  // Mixed tests
+  "I'm Kumar and en per Kumaran. Naan Chennai-la irukken.",
+];
 
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+console.log("=== Memory Extraction Test Results ===\n");
 
-  const memories = await getUserMemory(user.id);
-  return Response.json({ memories });
-}
-
-// POST /api/memory/extract - Extract and save memories from conversation
-export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Check if memory is enabled
-  const { data: settings } = await supabase
-    .from("user_settings")
-    .select("memory_enabled")
-    .eq("user_id", user.id)
-    .single();
-
-  if (settings && !settings.memory_enabled) {
-    return Response.json({ saved: 0, total: 0, reason: "memory_disabled" });
-  }
-
-  const { messages } = await req.json();
-
-  // Extract memories from recent messages
-  const allText = messages
-    .filter((m: { role: string }) => m.role === "user")
-    .map((m: { content: string }) => m.content)
-    .join("\n");
-
-  const extractedMemories = extractMemoriesFromText(allText);
-
-  // Save each extracted memory
-  let saved = 0;
-  for (const memory of extractedMemories) {
-    try {
-      await upsertMemory(
-        user.id,
-        memory.category as
-          | "preference"
-          | "hobby"
-          | "date"
-          | "goal"
-          | "fact"
-          | "personality"
-          | "topic"
-          | "milestone",
-        memory.key,
-        memory.value,
-        memory.importance
-      );
-      saved++;
-    } catch (e) {
-      console.error("Failed to save memory:", e);
+for (const testCase of testCases) {
+  console.log(`Input: "${testCase}"`);
+  const memories = extractMemoriesFromText(testCase);
+  if (memories.length > 0) {
+    for (const memory of memories) {
+      console.log(`  → [${memory.category}] ${memory.value}`);
     }
+  } else {
+    console.log("  → No memories extracted");
   }
-
-  // Also check if user explicitly shared memory-like info
-  for (const pattern of EXPLICIT_PATTERNS) {
-    let match;
-    while ((match = pattern.exec(allText)) !== null) {
-      const value = match[1]?.trim();
-      if (value && value.length > 2) {
-        try {
-          await upsertMemory(
-            user.id,
-            "fact",
-            `explicit_${value.slice(0, 50)}`,
-            value,
-            9
-          );
-          saved++;
-        } catch (e) {
-          console.error("Failed to save explicit memory:", e);
-        }
-      }
-    }
-  }
-
-  return Response.json({ saved, total: extractedMemories.length });
-}
-
-// DELETE /api/memory - Delete memory (with optional id parameter)
-export async function DELETE(req: NextRequest) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const url = new URL(req.url);
-  const id = url.searchParams.get("id");
-
-  if (id) {
-    // Delete specific memory
-    await deleteMemory(id);
-    return Response.json({ ok: true });
-  }
-
-  // Delete all user memory
-  const { error } = await supabase
-    .from("user_memory")
-    .delete()
-    .eq("user_id", user.id);
-
-  if (error) {
-    return Response.json({ error: "Failed to clear memory" }, { status: 500 });
-  }
-
-  return Response.json({ ok: true, cleared: true });
+  console.log();
 }
