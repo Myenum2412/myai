@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -241,8 +241,8 @@ function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (tex
   return { listening, startListening, stopListening };
 }
 
-// ─── Typing Indicator Component ───
-function TypingIndicator({ companionName }: { companionName: string }) {
+// ─── Typing Indicator Component (Memoized) ───
+const TypingIndicator = memo(function TypingIndicator({ companionName }: { companionName: string }) {
   return (
     <div className="flex gap-3 justify-start">
       <Avatar className="h-8 w-8 shrink-0">
@@ -262,16 +262,261 @@ function TypingIndicator({ companionName }: { companionName: string }) {
       </div>
     </div>
   );
-}
+});
 
-// ─── Read Receipt Component ───
-function ReadReceipt({ isRead }: { isRead?: boolean }) {
+// ─── Read Receipt Component (Memoized) ───
+const ReadReceipt = memo(function ReadReceipt({ isRead }: { isRead?: boolean }) {
   return (
     <span className="text-[10px] text-muted-foreground/60 ml-1">
       {isRead ? "✓✓" : "✓"}
     </span>
   );
+});
+
+// ─── Message Bubble Component (Memoized) ───
+interface MessageBubbleProps {
+  message: Message;
+  index: number;
+  isEditing: boolean;
+  editContent: string;
+  onEditContentChange: (value: string) => void;
+  onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onStartEdit: () => void;
+  onAddReaction: (reaction: string) => void;
+  onToggleFavorite: () => void;
+  onSpeak: () => void;
+  userInitial: string;
 }
+
+const MessageBubble = memo(function MessageBubble({
+  message,
+  index,
+  isEditing,
+  editContent,
+  onEditContentChange,
+  onSaveEdit,
+  onCancelEdit,
+  onStartEdit,
+  onAddReaction,
+  onToggleFavorite,
+  onSpeak,
+  userInitial,
+}: MessageBubbleProps) {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") onSaveEdit();
+    if (e.key === "Escape") onCancelEdit();
+  }, [onSaveEdit, onCancelEdit]);
+
+  return (
+    <div
+      className={`flex gap-3 group ${
+        message.role === "user" ? "justify-end" : "justify-start"
+      }`}
+    >
+      {message.role === "assistant" && (
+        <Avatar className="h-8 w-8 shrink-0">
+          <AvatarFallback className="bg-gradient-to-br from-[#0077B6] to-[#03045E] text-white">
+            <SparklesIcon className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+      )}
+
+      <div
+        className={`max-w-[80%] ${
+          message.role === "user" ? "order-first" : ""
+        }`}
+      >
+        {/* Reasoning */}
+        {message.reasoning && (
+          <div className="mb-2 p-3 bg-[#CAF0F8]/30 dark:bg-[#03045E]/20 border border-[#90E0EF]/30 rounded-lg">
+            <div className="flex items-center gap-2 text-xs text-[#0077B6] mb-1">
+              <BrainIcon className="h-3 w-3" />
+              <span>Thinking...</span>
+            </div>
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+              {message.reasoning}
+            </p>
+          </div>
+        )}
+
+        {/* Message Bubble */}
+        <div
+          className={`px-4 py-2.5 ${
+            message.role === "user"
+              ? "bg-[#0077B6] text-white rounded-2xl rounded-br-sm"
+              : "bg-white dark:bg-gray-800 text-foreground border border-border/50 rounded-2xl rounded-bl-sm shadow-sm"
+          }`}
+        >
+          {isEditing ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={editContent}
+                onChange={e => onEditContentChange(e.target.value)}
+                className="flex-1 h-8 text-sm"
+                onKeyDown={handleKeyDown}
+                autoFocus
+              />
+              <Button
+                size="icon"
+                className="h-7 w-7"
+                onClick={onSaveEdit}
+              >
+                <CheckIcon className="h-3 w-3" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                onClick={onCancelEdit}
+              >
+                <XIcon className="h-3 w-3" />
+              </Button>
+            </div>
+          ) : (
+            <p className="whitespace-pre-wrap text-sm md:text-base">{message.content}</p>
+          )}
+        </div>
+
+        {/* Message Actions */}
+        {message.role === "assistant" && message.content && !isEditing && (
+          <div className="flex items-center gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* Reactions */}
+            {REACTIONS.map(r => (
+              <Button
+                key={r.id}
+                variant="ghost"
+                size="icon"
+                className={`h-6 w-6 transition-transform hover:scale-125 ${message.reaction === r.id ? "bg-[#0077B6]/10 scale-110" : ""}`}
+                onClick={() => onAddReaction(r.id)}
+              >
+                <span className="text-xs">{r.emoji}</span>
+              </Button>
+            ))}
+
+            <div className="w-px h-4 bg-border mx-1" />
+
+            {/* Favorite */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-6 w-6 transition-colors ${message.favorite ? "text-yellow-500" : ""}`}
+              onClick={onToggleFavorite}
+            >
+              <StarIcon
+                className={`h-3 w-3 ${message.favorite ? "fill-current" : ""}`}
+              />
+            </Button>
+
+            {/* Speak */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={onSpeak}
+            >
+              <Volume2Icon className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+
+        {/* User message actions */}
+        {message.role === "user" && message.content && !isEditing && (
+          <div className="flex items-center gap-1 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={onStartEdit}
+            >
+              <EditIcon className="h-3 w-3" />
+            </Button>
+            <ReadReceipt isRead={message.isRead} />
+          </div>
+        )}
+
+        {/* Reaction Display */}
+        {message.reaction && (
+          <div className="mt-1">
+            <span className="text-sm bg-white dark:bg-gray-800 border border-border/50 px-1.5 py-0.5 rounded-full shadow-sm">
+              {REACTIONS.find(r => r.id === message.reaction)?.emoji}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {message.role === "user" && (
+        <Avatar className="h-8 w-8 shrink-0">
+          <AvatarFallback className="bg-muted text-muted-foreground">
+            {userInitial}
+          </AvatarFallback>
+        </Avatar>
+      )}
+    </div>
+  );
+});
+
+// ─── Conversation Item Component (Memoized) ───
+interface ConversationItemProps {
+  conversation: Conversation;
+  isActive: boolean;
+  onSelect: () => void;
+  onTogglePin: () => void;
+  onDelete: () => void;
+}
+
+const ConversationItem = memo(function ConversationItem({
+  conversation,
+  isActive,
+  onSelect,
+  onTogglePin,
+  onDelete,
+}: ConversationItemProps) {
+  return (
+    <div
+      className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-all duration-200 rounded-lg ${
+        isActive
+          ? "bg-[#0077B6]/10 text-[#0077B6] shadow-sm"
+          : "hover:bg-muted/80 text-muted-foreground"
+      }`}
+      onClick={onSelect}
+    >
+      {conversation.pinned && (
+        <PinIcon className="h-3 w-3 shrink-0 text-[#0077B6]" />
+      )}
+      <MessageSquareIcon className="h-3.5 w-3.5 shrink-0 opacity-50" />
+      <span className="flex-1 truncate text-sm">{conversation.title}</span>
+      <div className="hidden group-hover:flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={e => {
+            e.stopPropagation();
+            onTogglePin();
+          }}
+        >
+          {conversation.pinned ? (
+            <PinOffIcon className="h-3 w-3" />
+          ) : (
+            <PinIcon className="h-3 w-3" />
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 text-destructive"
+          onClick={e => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <TrashIcon className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+});
 
 // ─── Main Chat Interface ───
 export function ChatInterface() {
@@ -300,9 +545,14 @@ export function ChatInterface() {
   const [showReactions, setShowReactions] = useState<number | null>(null);
   const [interimText, setInterimText] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollingRef = useRef(false);
   const router = useRouter();
   const { user, signOut } = useAuth();
   const tts = useTTS();
+
+  // Memoized user initial
+  const userInitial = useMemo(() => user?.email?.charAt(0).toUpperCase() || "U", [user?.email]);
+  const currentStyle = useMemo(() => STYLES.find(s => s.id === selectedStyle), [selectedStyle]);
 
   const handleVoiceResult = useCallback((text: string) => {
     setInput(prev => prev + " " + text);
@@ -314,6 +564,20 @@ export function ChatInterface() {
   }, []);
 
   const speech = useSpeechRecognition(handleVoiceResult, handleInterim);
+
+  // Optimized auto-scroll with requestAnimationFrame
+  const scrollToBottom = useCallback(() => {
+    if (isAutoScrollingRef.current) return;
+    
+    isAutoScrollingRef.current = true;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]') || scrollRef.current;
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+      isAutoScrollingRef.current = false;
+    });
+  }, []);
 
   // Load conversations and settings
   useEffect(() => {
@@ -366,12 +630,11 @@ export function ChatInterface() {
     loadMessages();
   }, [activeConversation]);
 
-  // Auto-scroll
+  // Auto-scroll on messages change (debounced during streaming)
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isLoading]);
+    const timer = setTimeout(scrollToBottom, 50);
+    return () => clearTimeout(timer);
+  }, [messages, scrollToBottom]);
 
   // Load speech voices
   useEffect(() => {
@@ -380,7 +643,7 @@ export function ChatInterface() {
     }
   }, []);
 
-  const createNewConversation = async () => {
+  const createNewConversation = useCallback(async () => {
     try {
       const res = await fetch("/api/conversations", {
         method: "POST",
@@ -396,9 +659,9 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to create conversation:", e);
     }
-  };
+  }, [selectedStyle]);
 
-  const deleteConversation = async (id: string) => {
+  const deleteConversation = useCallback(async (id: string) => {
     try {
       await fetch(`/api/conversations?id=${id}`, { method: "DELETE" });
       setConversations(prev => prev.filter(c => c.id !== id));
@@ -409,9 +672,9 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to delete conversation:", e);
     }
-  };
+  }, [activeConversation]);
 
-  const togglePin = async (id: string, pinned: boolean) => {
+  const togglePin = useCallback(async (id: string, pinned: boolean) => {
     try {
       await fetch("/api/conversations", {
         method: "PATCH",
@@ -424,9 +687,9 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to toggle pin:", e);
     }
-  };
+  }, []);
 
-  const updateStyle = async (style: string) => {
+  const updateStyle = useCallback(async (style: string) => {
     setSelectedStyle(style);
     if (activeConversation) {
       try {
@@ -444,9 +707,9 @@ export function ChatInterface() {
         console.error("Failed to update style:", e);
       }
     }
-  };
+  }, [activeConversation]);
 
-  const addReaction = async (messageIndex: number, reaction: string) => {
+  const addReaction = useCallback(async (messageIndex: number, reaction: string) => {
     const msg = messages[messageIndex];
     if (!msg.id) return;
 
@@ -469,9 +732,9 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to add reaction:", e);
     }
-  };
+  }, [messages, activeConversation]);
 
-  const toggleFavorite = async (messageIndex: number) => {
+  const toggleFavorite = useCallback(async (messageIndex: number) => {
     const msg = messages[messageIndex];
     if (!msg.id) return;
 
@@ -493,19 +756,19 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to toggle favorite:", e);
     }
-  };
+  }, [messages, activeConversation]);
 
-  const startEditingMessage = (index: number) => {
+  const startEditingMessage = useCallback((index: number) => {
     setEditingMessageIndex(index);
     setEditContent(messages[index].content);
-  };
+  }, [messages]);
 
-  const cancelEditing = () => {
+  const cancelEditing = useCallback(() => {
     setEditingMessageIndex(null);
     setEditContent("");
-  };
+  }, []);
 
-  const saveEditedMessage = async (index: number) => {
+  const saveEditedMessage = useCallback(async (index: number) => {
     const msg = messages[index];
     if (!msg.id || !editContent.trim()) return;
 
@@ -529,9 +792,9 @@ export function ChatInterface() {
     } catch (e) {
       console.error("Failed to edit message:", e);
     }
-  };
+  }, [messages, editContent, activeConversation]);
 
-  const toggleVoiceChatMode = () => {
+  const toggleVoiceChatMode = useCallback(() => {
     if (voiceChatMode) {
       speech.stopListening();
       tts.stop();
@@ -539,19 +802,9 @@ export function ChatInterface() {
     } else {
       setVoiceChatMode(true);
     }
-  };
+  }, [voiceChatMode, speech, tts]);
 
-  // Auto-send in voice chat mode when user stops speaking
-  useEffect(() => {
-    if (voiceChatMode && !speech.listening && input.trim()) {
-      const timer = setTimeout(() => {
-        sendMessage();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [speech.listening, voiceChatMode]);
-
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
     // Interrupt TTS if speaking
@@ -668,16 +921,23 @@ export function ChatInterface() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [input, isLoading, tts, activeConversation, messages]);
+
+  // Auto-send in voice chat mode when user stops speaking
+  useEffect(() => {
+    if (voiceChatMode && !speech.listening && input.trim()) {
+      const timer = setTimeout(() => {
+        sendMessage();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [speech.listening, voiceChatMode, input, sendMessage]);
 
   const handleLogout = async () => {
     await signOut();
     router.push("/");
     router.refresh();
   };
-
-  const userInitial = user?.email?.charAt(0).toUpperCase() || "U";
-  const currentStyle = STYLES.find(s => s.id === selectedStyle);
 
   return (
     <div className="flex h-full bg-gradient-to-br from-[#CAF0F8]/20 via-white to-[#90E0EF]/10 dark:from-[#03045E]/10 dark:via-gray-900 dark:to-[#0077B6]/5">
@@ -718,52 +978,17 @@ export function ChatInterface() {
           <ScrollArea className="flex-1">
             <div className="p-2 space-y-1">
               {conversations.map(conv => (
-                <div
+                <ConversationItem
                   key={conv.id}
-                  className={`group flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-all duration-200 rounded-lg ${
-                    activeConversation === conv.id
-                      ? "bg-[#0077B6]/10 text-[#0077B6] shadow-sm"
-                      : "hover:bg-muted/80 text-muted-foreground"
-                  }`}
-                  onClick={() => {
+                  conversation={conv}
+                  isActive={activeConversation === conv.id}
+                  onSelect={() => {
                     setActiveConversation(conv.id);
                     setShowSidebar(false);
                   }}
-                >
-                  {conv.pinned && (
-                    <PinIcon className="h-3 w-3 shrink-0 text-[#0077B6]" />
-                  )}
-                  <MessageSquareIcon className="h-3.5 w-3.5 shrink-0 opacity-50" />
-                  <span className="flex-1 truncate text-sm">{conv.title}</span>
-                  <div className="hidden group-hover:flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={e => {
-                        e.stopPropagation();
-                        togglePin(conv.id, conv.pinned);
-                      }}
-                    >
-                      {conv.pinned ? (
-                        <PinOffIcon className="h-3 w-3" />
-                      ) : (
-                        <PinIcon className="h-3 w-3" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive"
-                      onClick={e => {
-                        e.stopPropagation();
-                        deleteConversation(conv.id);
-                      }}
-                    >
-                      <TrashIcon className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
+                  onTogglePin={() => togglePin(conv.id, conv.pinned)}
+                  onDelete={() => deleteConversation(conv.id)}
+                />
               ))}
               {conversations.length === 0 && (
                 <div className="text-center py-12">
@@ -944,161 +1169,28 @@ export function ChatInterface() {
             )}
 
             {messages.map((message, index) => (
-              <div
-                key={index}
-                className={`flex gap-3 group ${
-                  message.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                {message.role === "assistant" && (
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="bg-gradient-to-br from-[#0077B6] to-[#03045E] text-white">
-                      <SparklesIcon className="h-4 w-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-
-                <div
-                  className={`max-w-[80%] ${
-                    message.role === "user" ? "order-first" : ""
-                  }`}
-                >
-                  {/* Reasoning */}
-                  {message.reasoning && (
-                    <div className="mb-2 p-3 bg-[#CAF0F8]/30 dark:bg-[#03045E]/20 border border-[#90E0EF]/30 rounded-lg">
-                      <div className="flex items-center gap-2 text-xs text-[#0077B6] mb-1">
-                        <BrainIcon className="h-3 w-3" />
-                        <span>Thinking...</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                        {message.reasoning}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Message Bubble */}
-                  <div
-                    className={`px-4 py-2.5 ${
-                      message.role === "user"
-                        ? "bg-[#0077B6] text-white rounded-2xl rounded-br-sm"
-                        : "bg-white dark:bg-gray-800 text-foreground border border-border/50 rounded-2xl rounded-bl-sm shadow-sm"
-                    }`}
-                  >
-                    {editingMessageIndex === index ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={editContent}
-                          onChange={e => setEditContent(e.target.value)}
-                          className="flex-1 h-8 text-sm"
-                          onKeyDown={e => {
-                            if (e.key === "Enter") saveEditedMessage(index);
-                            if (e.key === "Escape") cancelEditing();
-                          }}
-                          autoFocus
-                        />
-                        <Button
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => saveEditedMessage(index)}
-                        >
-                          <CheckIcon className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={cancelEditing}
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap text-sm md:text-base">{message.content}</p>
-                    )}
-                  </div>
-
-                  {/* Message Actions */}
-                  {message.role === "assistant" && message.content && editingMessageIndex !== index && (
-                    <div className="flex items-center gap-0.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {/* Reactions */}
-                      {REACTIONS.map(r => (
-                        <Button
-                          key={r.id}
-                          variant="ghost"
-                          size="icon"
-                          className={`h-6 w-6 transition-transform hover:scale-125 ${message.reaction === r.id ? "bg-[#0077B6]/10 scale-110" : ""}`}
-                          onClick={() => addReaction(index, r.id)}
-                        >
-                          <span className="text-xs">{r.emoji}</span>
-                        </Button>
-                      ))}
-
-                      <div className="w-px h-4 bg-border mx-1" />
-
-                      {/* Favorite */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={`h-6 w-6 transition-colors ${message.favorite ? "text-yellow-500" : ""}`}
-                        onClick={() => toggleFavorite(index)}
-                      >
-                        <StarIcon
-                          className={`h-3 w-3 ${message.favorite ? "fill-current" : ""}`}
-                        />
-                      </Button>
-
-                      {/* Speak */}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() =>
-                          tts.speak(
-                            message.content,
-                            settings.voice_speed,
-                            settings.voice_pitch,
-                            settings.voice_volume
-                          )
-                        }
-                      >
-                        <Volume2Icon className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  )}
-
-                  {/* User message actions */}
-                  {message.role === "user" && message.content && editingMessageIndex !== index && (
-                    <div className="flex items-center gap-1 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => startEditingMessage(index)}
-                      >
-                        <EditIcon className="h-3 w-3" />
-                      </Button>
-                      <ReadReceipt isRead={message.isRead} />
-                    </div>
-                  )}
-
-                  {/* Reaction Display */}
-                  {message.reaction && (
-                    <div className="mt-1">
-                      <span className="text-sm bg-white dark:bg-gray-800 border border-border/50 px-1.5 py-0.5 rounded-full shadow-sm">
-                        {REACTIONS.find(r => r.id === message.reaction)?.emoji}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {message.role === "user" && (
-                  <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="bg-muted text-muted-foreground">
-                      {userInitial}
-                    </AvatarFallback>
-                  </Avatar>
-                )}
-              </div>
+              <MessageBubble
+                key={message.id || `msg-${index}`}
+                message={message}
+                index={index}
+                isEditing={editingMessageIndex === index}
+                editContent={editContent}
+                onEditContentChange={setEditContent}
+                onSaveEdit={() => saveEditedMessage(index)}
+                onCancelEdit={cancelEditing}
+                onStartEdit={() => startEditingMessage(index)}
+                onAddReaction={(reaction) => addReaction(index, reaction)}
+                onToggleFavorite={() => toggleFavorite(index)}
+                onSpeak={() =>
+                  tts.speak(
+                    message.content,
+                    settings.voice_speed,
+                    settings.voice_pitch,
+                    settings.voice_volume
+                  )
+                }
+                userInitial={userInitial}
+              />
             ))}
 
             {/* Typing Indicator */}

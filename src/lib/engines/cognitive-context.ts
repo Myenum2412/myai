@@ -112,6 +112,7 @@ export class CognitiveContextManager {
 
   /**
    * Build complete cognitive snapshot for a conversation turn
+   * OPTIMIZED: Uses instant rule-based emotion analysis, defers LLM to background
    */
   async buildSnapshot(
     userId: string,
@@ -127,18 +128,17 @@ export class CognitiveContextManager {
       memories,
       relationship,
       personality,
-      emotionPatterns,
     ] = await Promise.all([
       memoryEngine.getMemoryContext(userId),
       relationshipEngine.getRelationshipState(userId),
       personalityEngine.getPersonality(userId),
-      this.getEmotionPatterns(userId),
     ]);
 
-    // LLM-powered emotion analysis (replaces rule-based)
-    const emotion = await this.analyzeEmotionDeep(userText, messages, memories, emotionPatterns);
+    // OPTIMIZED: Use instant rule-based emotion analysis (no LLM call)
+    // The LLM analysis is now deferred to background for next turn
+    const emotion = emotionEngine.analyzeEmotion(userText);
 
-    // Build context dimensions
+    // Build context dimensions (all synchronous, no DB calls)
     const time = this.buildTimeContext();
     const language = this.buildLanguageContext(messages);
     const goals = await this.getGoalContext(userId);
@@ -183,7 +183,58 @@ export class CognitiveContextManager {
       timestamp: new Date().toISOString(),
     });
 
+    // OPTIMIZED: Fire-and-forget LLM emotion analysis for future use
+    // This improves accuracy for NEXT turn without blocking current response
+    this.analyzeEmotionInBackground(userId, userText, messages, memories);
+
     return snapshot;
+  }
+
+  /**
+   * Background LLM emotion analysis - runs after response starts streaming
+   * Updates the emotion patterns cache for next turn
+   */
+  private async analyzeEmotionInBackground(
+    userId: string,
+    text: string,
+    messages: { role: string; content: string }[],
+    memories: MemoryContext
+  ): Promise<void> {
+    try {
+      // Get recent emotion patterns for context
+      const supabase = await createClient();
+      const { data } = await supabase
+        .from("emotion_history")
+        .select("primary_emotion")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      const patterns: { emotion: Emotion; frequency: number }[] = [];
+      if (data) {
+        const counts: Record<string, number> = {};
+        for (const row of data) {
+          counts[row.primary_emotion] = (counts[row.primary_emotion] || 0) + 1;
+        }
+        patterns.push(...Object.entries(counts)
+          .map(([emotion, frequency]) => ({ emotion: emotion as Emotion, frequency }))
+          .sort((a, b) => b.frequency - a.frequency));
+      }
+
+      const llmEmotion = await this.analyzeEmotionDeep(text, messages, memories, patterns);
+
+      // Store the LLM-analyzed emotion for next turn's context
+      await supabase.from("emotion_history").insert({
+        user_id: userId,
+        primary_emotion: llmEmotion.primary,
+        intensity: llmEmotion.intensity,
+        valence: llmEmotion.valence,
+        arousal: llmEmotion.arousal,
+      });
+    } catch (e) {
+      // Silent failure - rule-based emotion is already used
+      console.error("Background emotion analysis failed:", e);
+    }
   }
 
   /**

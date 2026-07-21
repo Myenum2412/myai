@@ -4,7 +4,6 @@ import { cognitiveContextManager } from "@/lib/engines/cognitive-context";
 import { memoryEngine } from "@/lib/engines/memory";
 import { relationshipEngine } from "@/lib/engines/relationship";
 import { reflectionEngine } from "@/lib/engines/reflection";
-import { goalEngine } from "@/lib/engines/goals";
 import { analyticsEngine } from "@/lib/engines/analytics";
 import { addMessage, getConversationStyle } from "@/lib/db";
 
@@ -43,9 +42,10 @@ export async function POST(req: NextRequest) {
     // Add memory context
     const memoryPrompt = memoryEngine.buildMemoryPrompt(snapshot.memory);
 
-    // Add goal context
-    const goals = await goalEngine.getGoals(user.id);
-    const goalContext = goalEngine.buildGoalContext(goals.active, []);
+    // OPTIMIZED: Use goals from snapshot (already fetched) instead of duplicate query
+    const goalContext = snapshot.goals.active_goals.length > 0
+      ? `\n## Goals\n` + snapshot.goals.active_goals.slice(0, 3).map(g => `- ${g.title} (${g.progress}% complete)`).join("\n") + "\n"
+      : "";
 
     // Add relationship context
     const relationshipContext = relationshipEngine.buildRelationshipContext(snapshot.relationship);

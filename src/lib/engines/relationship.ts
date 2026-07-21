@@ -71,12 +71,24 @@ const INSIDE_JOKE_STARTERS = [
   "Hey, that's just like what you said before about...",
 ];
 
+// ─── Request-level Cache ───
+const relationshipCache = new Map<string, { data: RelationshipState; timestamp: number }>();
+const CACHE_TTL = 60 * 1000; // 60 seconds - relationship changes slowly
+
 // ─── Main Relationship Engine ───
 export class RelationshipEngine {
   /**
    * Get or create relationship state
+   * OPTIMIZED: Uses request-level cache
    */
   async getRelationshipState(userId: string): Promise<RelationshipState> {
+    // Check cache first
+    const cacheKey = `relationship:${userId}`;
+    const cached = relationshipCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -89,11 +101,22 @@ export class RelationshipEngine {
       return this.createInitialRelationship(userId);
     }
 
+    // Cache the result
+    relationshipCache.set(cacheKey, { data, timestamp: Date.now() });
+
     return data;
   }
 
   /**
+   * Invalidate relationship cache for a user
+   */
+  invalidateCache(userId: string): void {
+    relationshipCache.delete(`relationship:${userId}`);
+  }
+
+  /**
    * Update relationship after a conversation
+   * OPTIMIZED: Invalidates cache after update
    */
   async updateAfterConversation(
     userId: string,
@@ -153,6 +176,10 @@ export class RelationshipEngine {
 
     // Save
     await this.saveRelationshipState(state);
+
+    // Invalidate cache so next request gets fresh data
+    this.invalidateCache(userId);
+
     return state;
   }
 

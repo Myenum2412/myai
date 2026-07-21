@@ -135,12 +135,24 @@ const STYLE_MODIFIERS: Record<string, {
   },
 };
 
+// ─── Request-level Cache ───
+const personalityCache = new Map<string, { data: PersonalityConfig; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes - personality changes rarely
+
 // ─── Main Personality Engine ───
 export class PersonalityEngine {
   /**
    * Get or create personality config
+   * OPTIMIZED: Uses request-level cache
    */
   async getPersonality(userId: string): Promise<PersonalityConfig> {
+    // Check cache first
+    const cacheKey = `personality:${userId}`;
+    const cached = personalityCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -153,11 +165,22 @@ export class PersonalityEngine {
       return this.createDefaultPersonality(userId);
     }
 
+    // Cache the result
+    personalityCache.set(cacheKey, { data, timestamp: Date.now() });
+
     return data;
   }
 
   /**
+   * Invalidate personality cache for a user
+   */
+  invalidateCache(userId: string): void {
+    personalityCache.delete(`personality:${userId}`);
+  }
+
+  /**
    * Update personality settings
+   * OPTIMIZED: Invalidates cache after update
    */
   async updatePersonality(userId: string, updates: Partial<PersonalityConfig>): Promise<PersonalityConfig> {
     const supabase = await createClient();
@@ -172,6 +195,10 @@ export class PersonalityEngine {
       .single();
 
     if (error) throw error;
+
+    // Invalidate cache
+    this.invalidateCache(userId);
+
     return data;
   }
 

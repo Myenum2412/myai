@@ -41,6 +41,10 @@ const MEMORY_CONFIG = {
   },
 };
 
+// ─── Request-level Cache ───
+const memoryCache = new Map<string, { data: MemoryContext; timestamp: number }>();
+const CACHE_TTL = 30 * 1000; // 30 seconds - memories don't change that fast
+
 // ─── Importance Scoring ───
 const CATEGORY_IMPORTANCE: Record<MemoryCategory, number> = {
   milestone: 9,
@@ -60,8 +64,16 @@ const CATEGORY_IMPORTANCE: Record<MemoryCategory, number> = {
 export class MemoryEngine {
   /**
    * Get complete memory context for a conversation
+   * OPTIMIZED: Uses request-level cache to reduce DB queries
    */
   async getMemoryContext(userId: string): Promise<MemoryContext> {
+    // Check cache first
+    const cacheKey = `memory:${userId}`;
+    const cached = memoryCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
+
     const supabase = await createClient();
 
     const [shortTerm, longTerm, episodic, semantic, emotional, summaries] = await Promise.all([
@@ -73,11 +85,34 @@ export class MemoryEngine {
       this.getSummaries(supabase, userId),
     ]);
 
-    return { short_term: shortTerm, long_term: longTerm, episodic, semantic, emotional, summaries };
+    const result: MemoryContext = { short_term: shortTerm, long_term: longTerm, episodic, semantic, emotional, summaries };
+
+    // Cache the result
+    memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
+
+    // Clean old cache entries periodically
+    if (memoryCache.size > 100) {
+      const now = Date.now();
+      for (const [key, val] of memoryCache.entries()) {
+        if (now - val.timestamp > CACHE_TTL * 2) {
+          memoryCache.delete(key);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Invalidate memory cache for a user (call after storing new memories)
+   */
+  invalidateCache(userId: string): void {
+    memoryCache.delete(`memory:${userId}`);
   }
 
   /**
    * Store a memory entry with automatic classification
+   * OPTIMIZED: Invalidates cache after storing
    */
   async storeMemory(
     userId: string,
@@ -120,6 +155,10 @@ export class MemoryEngine {
       .single();
 
     if (error) throw error;
+
+    // Invalidate cache so next request gets fresh data
+    this.invalidateCache(userId);
+
     return data;
   }
 
