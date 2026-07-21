@@ -76,16 +76,25 @@ export class MemoryEngine {
 
     const supabase = await createClient();
 
-    const [shortTerm, longTerm, episodic, semantic, emotional, summaries] = await Promise.all([
-      this.getMemoriesByType(supabase, userId, "short_term"),
-      this.getMemoriesByType(supabase, userId, "long_term"),
-      this.getMemoriesByType(supabase, userId, "episodic"),
-      this.getMemoriesByType(supabase, userId, "semantic"),
-      this.getMemoriesByType(supabase, userId, "emotional"),
-      this.getSummaries(supabase, userId),
-    ]);
+    // Get all memories for the user
+    const { data: memories } = await supabase
+      .from("user_memory")
+      .select("*")
+      .eq("user_id", userId)
+      .order("importance", { ascending: false })
+      .limit(100);
 
-    const result: MemoryContext = { short_term: shortTerm, long_term: longTerm, episodic, semantic, emotional, summaries };
+    const allMemories = memories || [];
+
+    // Categorize memories by category for the context
+    const result: MemoryContext = {
+      short_term: allMemories.filter(m => m.importance <= 5),
+      long_term: allMemories.filter(m => m.importance > 5),
+      episodic: allMemories.filter(m => m.category === "milestone"),
+      semantic: allMemories.filter(m => m.category === "fact" || m.category === "preference"),
+      emotional: allMemories.filter(m => m.category === "personality"),
+      summaries: [],
+    };
 
     // Cache the result
     memoryCache.set(cacheKey, { data: result, timestamp: Date.now() });
@@ -133,21 +142,14 @@ export class MemoryEngine {
     const emotional_weight = options.emotional_weight || this.calculateEmotionalWeight(value);
 
     const { data, error } = await supabase
-      .from("memory_entries")
+      .from("user_memory")
       .upsert(
         {
           user_id: userId,
-          type,
           category,
-          content: value,
           key,
           value,
           importance,
-          emotional_weight,
-          access_count: 0,
-          last_accessed: new Date().toISOString(),
-          metadata: options.metadata || {},
-          expires_at: options.expires_at || null,
         },
         { onConflict: "user_id,key" }
       )
@@ -179,7 +181,7 @@ export class MemoryEngine {
     const limit = options.limit || 10;
 
     let queryBuilder = supabase
-      .from("memory_entries")
+      .from("user_memory")
       .select("*")
       .eq("user_id", userId)
       .gt("importance", 3);
@@ -284,32 +286,11 @@ export class MemoryEngine {
   }
 
   /**
-   * Promote short-term memories to long-term based on access patterns
+   * Promote memories based on importance
    */
   async promoteMemories(userId: string): Promise<number> {
-    const supabase = await createClient();
-
-    const { data: candidates } = await supabase
-      .from("memory_entries")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("type", "short_term")
-      .gte("access_count", MEMORY_CONFIG.long_term.promotion_threshold)
-      .gte("importance", MEMORY_CONFIG.long_term.min_importance);
-
-    if (!candidates || candidates.length === 0) return 0;
-
-    let promoted = 0;
-    for (const memory of candidates) {
-      const { error } = await supabase
-        .from("memory_entries")
-        .update({ type: "long_term" })
-        .eq("id", memory.id);
-
-      if (!error) promoted++;
-    }
-
-    return promoted;
+    // No-op for now - memories are already stored with importance scores
+    return 0;
   }
 
   /**
@@ -346,21 +327,6 @@ export class MemoryEngine {
       created_at: new Date().toISOString(),
     };
 
-    // Store summary
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("memory_summaries")
-      .upsert({
-        user_id: userId,
-        period: entry.period,
-        summary: entry.summary,
-        key_moments: entry.key_moments,
-        emotional_highlights: entry.emotional_highlights,
-      }, { onConflict: "user_id,period" })
-      .select()
-      .single();
-
-    if (data) entry.id = data.id;
     return entry;
   }
 
@@ -368,45 +334,27 @@ export class MemoryEngine {
    * Clean up expired memories
    */
   async cleanupExpired(userId: string): Promise<number> {
-    const supabase = await createClient();
-    const now = new Date().toISOString();
-
-    const { data, error } = await supabase
-      .from("memory_entries")
-      .delete()
-      .eq("user_id", userId)
-      .lt("expires_at", now)
-      .select();
-
-    return data?.length || 0;
+    // No-op for now - user_memory table doesn't have expires_at
+    return 0;
   }
 
   // ─── Private Helpers ───
 
   private async getMemoriesByType(supabase: SupabaseClient, userId: string, type: MemoryType): Promise<MemoryEntry[]> {
     const { data, error } = await supabase
-      .from("memory_entries")
+      .from("user_memory")
       .select("*")
       .eq("user_id", userId)
-      .eq("type", type)
       .order("importance", { ascending: false })
-      .order("last_accessed", { ascending: false })
-      .limit(type === "short_term" ? MEMORY_CONFIG.short_term.max_entries : 50);
+      .limit(50);
 
     if (error) return [];
     return data || [];
   }
 
   private async getSummaries(supabase: SupabaseClient, userId: string): Promise<MemorySummary[]> {
-    const { data, error } = await supabase
-      .from("memory_summaries")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(5);
-
-    if (error) return [];
-    return data || [];
+    // No-op for now - memory_summaries table doesn't exist
+    return [];
   }
 
   private classifyMemoryType(category: MemoryCategory, importance: number): MemoryType {

@@ -47,38 +47,38 @@ const ENGLISH_PATTERNS = {
 // Tamil/Tanglish memory extraction patterns
 const TANGLISH_PATTERNS = {
   preference: [
-    /(?:enakku|enkku)\s+(.+?)\s+(?:romba|bayangara)?\s*(?:pudikkum|pidikkum|ishtam|favorite)/gi,
-    /(?:naan|naa)\s+(.+?)\s+(?:romba|bayangara)?\s*(?:enjoy|pandren|seiyven)/gi,
-    /(?:en\s+(?:favorite|fav))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:enakku|enkku)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:romba|bayangara)?\s*(?:pudikkum|pidikkum|ishtam|favorite)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:romba|bayangara)?\s*(?:enjoy|pandren|seiyven)/gi,
+    /(?:en\s+(?:favorite|fav))\s+([^\s]+(?:\s+[^\s]+)*?)(?:\.|!|$)/gi,
   ],
   hobby: [
-    /(?:naan|naa)\s+(.+?)\s+(?:pandren|seiyven|vilayaduven|padikken)/gi,
-    /(?:en\s+(?:hobby|hobbies|interest))\s+(?:.+?)?\s*(?:romba|bayangara)?\s*(?:pudikkum|ishtam)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:pandren|seiyven|vilayaduven|padikken)/gi,
+    /(?:en\s+(?:hobby|hobbies|interest))\s+([^\s]+(?:\s+[^\s]+)*?)\s*(?:romba|bayangara)?\s*(?:pudikkum|ishtam)/gi,
   ],
   date: [
-    /(?:en\s+(?:birthday|pirainal|piranthanaal))\s+(?:.+?)?\s*(.+?)(?:\.|!|$)/gi,
-    /(?:naan|naa)\s+(.+?)\s+(?:piranthen|poranthen)/gi,
+    /(?:en\s+(?:birthday|pirainal|piranthanaal))\s+([^\s]+(?:\s+[^\s]+)*?)(?:\.|!|$)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:piranthen|poranthen)/gi,
   ],
   goal: [
-    /(?:naan|naa)\s+(.+?)\s+(?:pannanum|seiyaven|aaganum)/gi,
-    /(?:en\s+(?:goal|dream))\s+(?:.+?)?\s*(.+?)(?:\.|!|$)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:pannanum|seiyaven|aaganum)/gi,
+    /(?:en\s+(?:goal|dream))\s+([^\s]+(?:\s+[^\s]+)*?)(?:\.|!|$)/gi,
   ],
   fact: [
-    /(?:en\s+(?:per|name))\s+(?:.+?)?\s*(.+?)(?:\.|!|$)/gi,
-    /(?:naan|naa)\s+(.+?)\s+(?:la irukken|la work|la study)/gi,
-    /(?:naan|naa)\s+(.+?)\s+(?:irukken|irukku)/gi,
-    /(?:naan|naa)\s+(.+?)\s+(?:student|engineer|doctor|teacher)/gi,
+    /(?:en\s+(?:per|name))\s+([^\s]+(?:\s+[^\s]+)*?)(?:\.|!|$)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:la irukken|la work|la study)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:irukken|irukku)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:student|engineer|doctor|teacher)/gi,
     /(?:naan|naa)\s+(?:irundhu\s+)?vandhen/i,
   ],
   personality: [
-    /(?:naan|naa)\s+(?:.+?)?\s*(shy|introvert|extrovert|ambivert|outgoing|quiet|funny|serious)/gi,
+    /(?:naan|naa)\s+([^\s]+(?:\s+[^\s]+)*?)\s*(shy|introvert|extrovert|ambivert|outgoing|quiet|funny|serious)/gi,
   ],
   topic: [
-    /(?:ippo|ini)\s+(.+?)\s+(?:pathi|patti)\s+(?:pesalaam|pesuvom|chat)/gi,
-    /(?:.+?)\s+(?:pathi|patti)\s+(?:pesanum|pesalaam|solunga)/gi,
+    /(?:ippo|ini)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:pathi|patti)\s+(?:pesalaam|pesuvom|chat)/gi,
+    /([^\s]+(?:\s+[^\s]+)*?)\s+(?:pathi|patti)\s+(?:pesanum|pesalaam|solunga)/gi,
   ],
   milestone: [
-    /(?:naam|namma)\s+(.+?)\s+(?:first|first time|first met)/gi,
+    /(?:naam|namma)\s+([^\s]+(?:\s+[^\s]+)*?)\s+(?:first|first time|first met)/gi,
   ],
 };
 
