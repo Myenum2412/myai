@@ -2,7 +2,7 @@ export interface Conversation {
   id: string;
   user_id: string;
   title: string;
-  style: 'romantic' | 'friendly' | 'motivational' | 'cheerful' | 'calm' | 'caring' | 'humorous';
+  style: 'romantic' | 'friendly' | 'motivational' | 'cheerful' | 'calm' | 'caring' | 'humorous' | 'intimate';
   pinned: boolean;
   created_at: string;
   updated_at: string;
@@ -105,7 +105,7 @@ export interface PersonalityConfig {
   confidence: number;
   formality: number;
   conversation_depth: 'casual' | 'moderate' | 'deep' | 'adaptive';
-  communication_style: 'romantic' | 'friendly' | 'motivational' | 'cheerful' | 'calm' | 'caring' | 'humorous';
+  communication_style: 'romantic' | 'friendly' | 'motivational' | 'cheerful' | 'calm' | 'caring' | 'humorous' | 'intimate';
   created_at: string;
   updated_at: string;
 }

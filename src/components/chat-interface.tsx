@@ -70,6 +70,7 @@ interface UserSettings {
 const STYLES = [
   { id: "caring", label: "Caring", emoji: "🤗", color: "bg-pink-100 text-pink-700" },
   { id: "romantic", label: "Romantic", emoji: "💕", color: "bg-rose-100 text-rose-700" },
+  { id: "intimate", label: "Intimate", emoji: "💋", color: "bg-red-100 text-red-700" },
   { id: "friendly", label: "Friendly", emoji: "😊", color: "bg-yellow-100 text-yellow-700" },
   { id: "motivational", label: "Motivational", emoji: "🔥", color: "bg-orange-100 text-orange-700" },
   { id: "cheerful", label: "Cheerful", emoji: "😄", color: "bg-green-100 text-green-700" },
@@ -91,6 +92,9 @@ const VOICE_PROFILES = [
   { id: "energetic", label: "Energetic", speed: 1.1, pitch: 1.1 },
   { id: "calm", label: "Calm & Soothing", speed: 0.85, pitch: 0.95 },
   { id: "playful", label: "Playful", speed: 1.05, pitch: 1.15 },
+  { id: "intimate", label: "Intimate & Soft", speed: 0.8, pitch: 1.3 },
+  { id: "whisper", label: "Whisper", speed: 0.75, pitch: 1.25 },
+  { id: "passionate", label: "Passionate", speed: 0.95, pitch: 1.35 },
 ];
 
 // ─── Enhanced TTS Hook ───
@@ -98,6 +102,7 @@ function useTTS() {
   const [speaking, setSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [currentVoiceProfile, setCurrentVoiceProfile] = useState("default");
+  const [isWhisperMode, setIsWhisperMode] = useState(false);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const interruptRef = useRef(false);
@@ -105,6 +110,47 @@ function useTTS() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       synthRef.current = window.speechSynthesis;
+    }
+  }, []);
+
+  const playNotificationSound = useCallback((type: "message" | "typing" | "intimate" | "listen") => {
+    if (typeof window === "undefined") return;
+    
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    if (type === "message") {
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+      gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+    } else if (type === "typing") {
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+      gainNode.gain.setValueAtTime(0.05, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.05);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.05);
+    } else if (type === "intimate") {
+      oscillator.frequency.setValueAtTime(300, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(350, audioContext.currentTime + 0.15);
+      oscillator.frequency.setValueAtTime(280, audioContext.currentTime + 0.3);
+      gainNode.gain.setValueAtTime(0.08, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.4);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.4);
+    } else if (type === "listen") {
+      oscillator.frequency.setValueAtTime(500, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(700, audioContext.currentTime + 0.1);
+      gainNode.gain.setValueAtTime(0.08, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.15);
     }
   }, []);
 
@@ -120,7 +166,7 @@ function useTTS() {
       const profile = VOICE_PROFILES.find(p => p.id === currentVoiceProfile);
       utterance.rate = speed * (profile?.speed || 1);
       utterance.pitch = pitch * (profile?.pitch || 1);
-      utterance.volume = volume;
+      utterance.volume = isWhisperMode ? volume * 0.6 : volume;
 
       // Try to find a female voice (Tamil first, then English)
       const voices = synthRef.current.getVoices();
@@ -132,7 +178,10 @@ function useTTS() {
 
       utterance.voice = tamilVoice || englishFemaleVoice || englishVoice || null;
 
-      utterance.onstart = () => setSpeaking(true);
+      utterance.onstart = () => {
+        setSpeaking(true);
+        playNotificationSound("intimate");
+      };
       utterance.onend = () => {
         setSpeaking(false);
         interruptRef.current = false;
@@ -145,7 +194,7 @@ function useTTS() {
       utteranceRef.current = utterance;
       synthRef.current.speak(utterance);
     },
-    [voiceEnabled, currentVoiceProfile]
+    [voiceEnabled, currentVoiceProfile, isWhisperMode, playNotificationSound]
   );
 
   const interrupt = useCallback(() => {
@@ -167,21 +216,29 @@ function useTTS() {
     setVoiceEnabled(prev => !prev);
   }, [speaking, stop]);
 
+  const toggleWhisperMode = useCallback(() => {
+    setIsWhisperMode(prev => !prev);
+  }, []);
+
   return {
     speaking,
     voiceEnabled,
     currentVoiceProfile,
     setCurrentVoiceProfile,
+    isWhisperMode,
     speak,
     stop,
     interrupt,
     toggleVoice,
+    toggleWhisperMode,
+    playNotificationSound,
   };
 }
 
 // ─── Speech Recognition Hook ───
 function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (text: string) => void) {
   const [listening, setListening] = useState(false);
+  const [confidence, setConfidence] = useState(0);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   useEffect(() => {
@@ -197,11 +254,15 @@ function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (tex
         recognition.onresult = (event) => {
           let finalTranscript = "";
           let interimTranscript = "";
+          let lastConfidence = 0;
 
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const transcript = event.results[i][0].transcript;
+            const confidenceScore = event.results[i][0].confidence;
+            
             if (event.results[i].isFinal) {
               finalTranscript += transcript;
+              lastConfidence = confidenceScore;
             } else {
               interimTranscript += transcript;
             }
@@ -212,11 +273,15 @@ function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (tex
           }
 
           if (finalTranscript) {
+            setConfidence(lastConfidence);
             onResult(finalTranscript);
           }
         };
 
-        recognition.onerror = () => setListening(false);
+        recognition.onerror = (event) => {
+          console.error("Speech recognition error:", event.error);
+          setListening(false);
+        };
         recognition.onend = () => setListening(false);
 
         recognitionRef.current = recognition;
@@ -226,8 +291,12 @@ function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (tex
 
   const startListening = useCallback(() => {
     if (recognitionRef.current && !listening) {
-      recognitionRef.current.start();
-      setListening(true);
+      try {
+        recognitionRef.current.start();
+        setListening(true);
+      } catch (e) {
+        console.error("Failed to start recognition:", e);
+      }
     }
   }, [listening]);
 
@@ -238,7 +307,7 @@ function useSpeechRecognition(onResult: (text: string) => void, onInterim?: (tex
     }
   }, [listening]);
 
-  return { listening, startListening, stopListening };
+  return { listening, confidence, startListening, stopListening };
 }
 
 // ─── Typing Indicator Component (Memoized) ───
@@ -925,13 +994,23 @@ export function ChatInterface() {
 
   // Auto-send in voice chat mode when user stops speaking
   useEffect(() => {
-    if (voiceChatMode && !speech.listening && input.trim()) {
+    if (voiceChatMode && !speech.listening && input.trim() && !isLoading) {
       const timer = setTimeout(() => {
         sendMessage();
-      }, 500);
+      }, 800); // Slightly longer delay to ensure user is done speaking
       return () => clearTimeout(timer);
     }
-  }, [speech.listening, voiceChatMode, input, sendMessage]);
+  }, [speech.listening, voiceChatMode, input, sendMessage, isLoading]);
+
+  // Auto-restart listening in voice chat mode after AI finishes speaking
+  useEffect(() => {
+    if (voiceChatMode && !tts.speaking && !speech.listening && !isLoading) {
+      const timer = setTimeout(() => {
+        speech.startListening();
+      }, 1000); // Wait 1 second after AI finishes before listening again
+      return () => clearTimeout(timer);
+    }
+  }, [voiceChatMode, tts.speaking, speech.listening, isLoading, speech.startListening]);
 
   const handleLogout = async () => {
     await signOut();
@@ -1202,21 +1281,61 @@ export function ChatInterface() {
 
         {/* Voice Chat Mode Overlay */}
         {voiceChatMode && (
-          <div className="border-t bg-gradient-to-r from-[#0077B6]/5 to-[#03045E]/5 p-4">
-            <div className="max-w-3xl mx-auto flex items-center justify-center gap-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                Voice chat active — speak naturally
+          <div className="border-t bg-gradient-to-r from-[#0077B6]/10 to-[#03045E]/10 p-4">
+            <div className="max-w-3xl mx-auto space-y-3">
+              <div className="flex items-center justify-center gap-4">
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full animate-pulse ${speech.listening ? "bg-green-500" : "bg-yellow-500"}`} />
+                  {speech.listening ? "Listening... speak now" : "Voice chat active — tap mic to speak"}
+                </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={toggleVoiceChatMode}
-                className="text-xs"
-              >
-                <PhoneOffIcon className="h-3 w-3 mr-1" />
-                End Voice Chat
-              </Button>
+              
+              {/* Voice Controls */}
+              <div className="flex items-center justify-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={tts.toggleWhisperMode}
+                  className={`text-xs ${tts.isWhisperMode ? "text-[#0077B6] bg-[#0077B6]/10" : ""}`}
+                >
+                  {tts.isWhisperMode ? "🤫 Whisper On" : "🔊 Normal"}
+                </Button>
+                
+                <div className="w-px h-4 bg-border" />
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={tts.toggleVoice}
+                  className={`text-xs ${!tts.voiceEnabled ? "text-muted-foreground" : ""}`}
+                >
+                  {tts.voiceEnabled ? "🔊 Voice On" : "🔇 Voice Off"}
+                </Button>
+                
+                <div className="w-px h-4 bg-border" />
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={toggleVoiceChatMode}
+                  className="text-xs text-red-500 hover:text-red-600"
+                >
+                  <PhoneOffIcon className="h-3 w-3 mr-1" />
+                  End Call
+                </Button>
+              </div>
+              
+              {/* Speaking Indicator */}
+              {tts.speaking && (
+                <div className="flex items-center justify-center gap-2 text-xs text-[#0077B6]">
+                  <div className="flex gap-1">
+                    <span className="h-1 w-1 bg-[#0077B6] rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="h-1 w-1 bg-[#0077B6] rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="h-1 w-1 bg-[#0077B6] rounded-full animate-bounce" />
+                  </div>
+                  <span>{settings.companion_name} is speaking...</span>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1462,6 +1581,24 @@ export function ChatInterface() {
                 className={settings.memory_enabled ? "bg-[#0077B6] text-white" : ""}
               >
                 {settings.memory_enabled ? "On" : "Off"}
+              </Button>
+            </div>
+
+            {/* Whisper Mode */}
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm font-medium">Whisper Mode</span>
+                <p className="text-xs text-muted-foreground">
+                  Softer, more intimate voice responses
+                </p>
+              </div>
+              <Button
+                variant={tts.isWhisperMode ? "default" : "outline"}
+                size="sm"
+                onClick={tts.toggleWhisperMode}
+                className={tts.isWhisperMode ? "bg-[#0077B6] text-white" : ""}
+              >
+                {tts.isWhisperMode ? "On" : "Off"}
               </Button>
             </div>
 
