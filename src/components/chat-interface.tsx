@@ -607,6 +607,8 @@ export function ChatInterface() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  const [memories, setMemories] = useState<Array<{ id: string; category: string; key: string; value: string; importance: number }>>([]);
   const [selectedStyle, setSelectedStyle] = useState("caring");
   const [editingMessageIndex, setEditingMessageIndex] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -674,6 +676,32 @@ export function ChatInterface() {
 
     loadData();
   }, [user]);
+
+  // Load memories
+  const loadMemories = useCallback(async () => {
+    try {
+      const res = await fetch("/api/memory");
+      const data = await res.json();
+      if (data.memories) setMemories(data.memories);
+    } catch (e) {
+      console.error("Failed to load memories:", e);
+    }
+  }, []);
+
+  // Load memories when memory panel opens
+  useEffect(() => {
+    if (showMemory) loadMemories();
+  }, [showMemory, loadMemories]);
+
+  // Delete memory
+  const deleteMemory = useCallback(async (id: string) => {
+    try {
+      await fetch(`/api/memory?id=${id}`, { method: "DELETE" });
+      setMemories(prev => prev.filter(m => m.id !== id));
+    } catch (e) {
+      console.error("Failed to delete memory:", e);
+    }
+  }, []);
 
   // Load messages when conversation changes
   useEffect(() => {
@@ -1085,6 +1113,15 @@ export function ChatInterface() {
 
           {/* Sidebar Footer */}
           <div className="p-4 border-t border-border/50 space-y-1">
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-sm"
+              size="sm"
+              onClick={() => setShowMemory(true)}
+            >
+              <BrainIcon className="h-4 w-4 mr-2" />
+              Memory ({memories.length})
+            </Button>
             <Button
               variant="ghost"
               className="w-full justify-start text-sm"
@@ -1731,6 +1768,112 @@ export function ChatInterface() {
             >
               Got it
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Memory Panel ─── */}
+      {showMemory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 border border-border/50 w-full max-w-lg mx-4 p-6 space-y-4 rounded-2xl shadow-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <BrainIcon className="h-5 w-5" />
+                Memory
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowMemory(false)}
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              Things {settings.companion_name} remembers about you. Memories are automatically extracted from our conversations.
+            </p>
+
+            <ScrollArea className="flex-1 -mx-2 px-2">
+              {memories.length === 0 ? (
+                <div className="text-center py-12">
+                  <BrainIcon className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
+                  <p className="text-sm text-muted-foreground">No memories yet</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">
+                    Start chatting and I&apos;ll remember things about you!
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {memories.map(memory => (
+                    <div
+                      key={memory.id}
+                      className="group flex items-start gap-3 p-3 bg-muted/50 rounded-lg hover:bg-muted/80 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-medium text-[#0077B6] capitalize">
+                            {memory.category}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {memory.value}
+                          </span>
+                        </div>
+                        {memory.key !== memory.value && (
+                          <p className="text-xs text-muted-foreground/60 truncate">
+                            Key: {memory.key}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-muted-foreground">
+                          {memory.importance}/10
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-destructive"
+                          onClick={() => deleteMemory(memory.id)}
+                        >
+                          <TrashIcon className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+
+            <div className="flex items-center justify-between pt-2 border-t">
+              <p className="text-xs text-muted-foreground">
+                {memories.length} memories stored
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={loadMemories}
+                >
+                  Refresh
+                </Button>
+                {memories.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs text-destructive"
+                    onClick={async () => {
+                      if (confirm("Delete all memories? This cannot be undone.")) {
+                        await fetch("/api/memory", { method: "DELETE" });
+                        setMemories([]);
+                      }
+                    }}
+                  >
+                    Clear All
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

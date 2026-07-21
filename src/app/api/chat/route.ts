@@ -5,7 +5,7 @@ import { memoryEngine } from "@/lib/engines/memory";
 import { relationshipEngine } from "@/lib/engines/relationship";
 import { reflectionEngine } from "@/lib/engines/reflection";
 import { analyticsEngine } from "@/lib/engines/analytics";
-import { addMessage, getConversationStyle } from "@/lib/db";
+import { addMessage, getConversationStyle, upsertMemory } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -148,6 +148,8 @@ export async function POST(req: NextRequest) {
                         importance: 7,
                         emotional_weight: snapshot.emotion.intensity,
                       }),
+                      // Extract and store memories from user messages
+                      extractMemoriesFromConversation(user.id, messages),
                       // Promote memories
                       memoryEngine.promoteMemories(user.id),
                       // Record analytics
@@ -213,5 +215,192 @@ export async function POST(req: NextRequest) {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
+  }
+}
+
+// ─── Memory Extraction from Conversation ───
+
+// English memory extraction patterns
+const ENGLISH_PATTERNS = {
+  preference: [
+    /(?:i (?:really )?(?:like|love|prefer|enjoy))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:my (?:favorite|fav|best))\s+(.+?)\s+(?:is|are)\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i (?:hate|don't like|dislike))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i'm (?:into|obsessed with))\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  hobby: [
+    /(?:i (?:like|love|enjoy) (?:to )?(?:playing|reading|watching|listening|cooking|traveling|hiking|running|painting|drawing|writing|coding|gaming))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:my (?:hobby|hobbies|interest) (?:is|are))\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  date: [
+    /(?:my (?:birthday|birth date|bday))\s+(?:is\s+)?(.+?)(?:\.|!|$)/gi,
+    /(?:our (?:anniversary|date))\s+(?:is\s+)?(.+?)(?:\.|!|$)/gi,
+    /(?:i was born on)\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  goal: [
+    /(?:i (?:want to|plan to|will|hope to))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:my (?:goal|dream|aspiration|plan))\s+(?:is|are)\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  fact: [
+    /(?:my name is|i'm|i am)\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i work (?:at|for|in))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i live (?:in|at))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i'm (?:from|from originally))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i study (?:at|in|under))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i'm (?:a|an) student)\s+(?:at\s+)?(.+?)(?:\.|!|$)/gi,
+  ],
+  personality: [
+    /(?:i am|i'm)\s+(?:a )?(?:really |very )?(?:shy|introvert|extrovert|ambivert|outgoing|quiet|loud|funny|serious|optimistic|pessimistic|romantic|practical)\s*(.+?)(?:\.|!|$)/gi,
+  ],
+  topic: [
+    /(?:let's talk about|talk to me about|i want to discuss)\s+(.+?)(?:\.|!|$)/gi,
+    /(?:i (?:want to|need to) talk about)\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  milestone: [
+    /(?:we (?:first|first time|first met))\s+(.+?)(?:\.|!|$)/gi,
+    /(?:our (?:first|special))\s+(.+?)(?:\.|!|$)/gi,
+  ],
+};
+
+// Tamil/Tanglish memory extraction patterns
+const TANGLISH_PATTERNS = {
+  preference: [
+    /(?:enakku|enkku)\s+(.+?)\s+(?:romba |bayangara )?(?:pudikkum|pidikkum|ishtam|favorite)/gi,
+    /(?:naan|naa)\s+(.+?)\s+(?:romba |bayangara )?(?:enjoy|pandren|seiyven)/gi,
+    /(?:en (?:favorite|fav))\s+(.+?)\s+(?:\.|!|$)/gi,
+  ],
+  hobby: [
+    /(?:naan|naa)\s+(.+?)\s+(?:pandren|seiyven|vilayaduven|padikken)/gi,
+    /(?:en (?:hobby|hobbies|interest))\s+(?:.+?)?\s+(?:romba |bayangara )?(?:pudikkum|ishtam)/gi,
+  ],
+  date: [
+    /(?:en (?:birthday|pirainal|piranthanaal))\s+(?:.+?)?\s+(.+?)(?:\.|!|$)/gi,
+    /(?:naan|naa)\s+(.+?)\s+(?:piranthen|poranthen)/gi,
+  ],
+  goal: [
+    /(?:naan|naa)\s+(.+?)\s+(?:pannanum|seiyaven|plan|want)/gi,
+    /(?:en (?:goal|dream|目标))\s+(?:.+?)?\s+(.+?)(?:\.|!|$)/gi,
+  ],
+  fact: [
+    /(?:en (?:per|name))\s+(?:.+?)?\s+(.+?)(?:\.|!|$)/gi,
+    /(?:naan|naa)\s+(.+?)\s+(?:la irukken|la work|la study)/gi,
+    /(?:naan|naa)\s+(.+?)\s+(?:la irukken|la irukku)/gi,
+    /(?:naan|naa)\s+(.+?)\s+(?:student|engineer|doctor|teacher)/gi,
+  ],
+  personality: [
+    /(?:naan|naa)\s+(?:.+?)?\s+(shy|introvert|extrovert|ambivert|outgoing|quiet|funny|serious)/gi,
+  ],
+  topic: [
+    /(?:ippo|ini) (.+?)\s+(?:pathi|patti) (?:pesalaam|pesuvom|chat)/gi,
+    /(?:.+?)\s+(?:pathi|patti) (?:pesanum|pesalaam|solunga)/gi,
+  ],
+  milestone: [
+    /(?:naam|namma)\s+(.+?)\s+(?:first|first time|first met)/gi,
+  ],
+};
+
+// Explicit memory requests (both languages)
+const EXPLICIT_PATTERNS = [
+  // English
+  /(?:remember|don't forget|i told you|i mentioned)\s+(?:that\s+)?(.+?)(?:\.|!|$)/gi,
+  /(?:make a note|note down|save this)\s+(?:that\s+)?(.+?)(?:\.|!|$)/gi,
+  // Tamil
+  /(?:remember|yaad vechukonga|maathikonga|marantheengaadhaa)\s+(?:.+?)?\s*(.+?)(?:\.|!|$)/gi,
+  /(?:enna pathi|en pathi)\s+(?:.+?)?\s*(?:记住|remember|solli irukken)/gi,
+];
+
+async function extractMemoriesFromConversation(
+  userId: string,
+  messages: { role: string; content: string }[]
+): Promise<void> {
+  // Get user messages
+  const userMessages = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.content)
+    .join("\n");
+
+  if (!userMessages) return;
+
+  const memories: Array<{ category: string; key: string; value: string; importance: number }> = [];
+  const seen = new Set<string>();
+
+  // Extract from English patterns
+  for (const [category, patterns] of Object.entries(ENGLISH_PATTERNS)) {
+    for (const pattern of patterns) {
+      const regex = new RegExp(pattern.source, pattern.flags);
+      let match;
+      while ((match = regex.exec(userMessages)) !== null) {
+        const value = match[1]?.trim() || match[2]?.trim();
+        if (value && value.length > 2 && value.length < 200) {
+          const key = `${category}_${value.toLowerCase().slice(0, 50)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            let importance = 5;
+            if (category === "date") importance = 8;
+            if (category === "goal") importance = 7;
+            if (category === "preference") importance = 6;
+            if (category === "milestone") importance = 9;
+            memories.push({ category, key, value, importance });
+          }
+        }
+      }
+    }
+  }
+
+  // Extract from Tanglish patterns
+  for (const [category, patterns] of Object.entries(TANGLISH_PATTERNS)) {
+    for (const pattern of patterns) {
+      const regex = new RegExp(pattern.source, pattern.flags);
+      let match;
+      while ((match = regex.exec(userMessages)) !== null) {
+        const value = match[1]?.trim() || match[2]?.trim();
+        if (value && value.length > 2 && value.length < 200) {
+          const key = `ta_${category}_${value.toLowerCase().slice(0, 50)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            let importance = 5;
+            if (category === "date") importance = 8;
+            if (category === "goal") importance = 7;
+            if (category === "preference") importance = 6;
+            if (category === "milestone") importance = 9;
+            memories.push({ category, key, value, importance });
+          }
+        }
+      }
+    }
+  }
+
+  // Check for explicit memory requests
+  for (const pattern of EXPLICIT_PATTERNS) {
+    let match;
+    while ((match = pattern.exec(userMessages)) !== null) {
+      const value = match[1]?.trim();
+      if (value && value.length > 2) {
+        const key = `explicit_${value.toLowerCase().slice(0, 50)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          memories.push({ category: "fact", key, value, importance: 9 });
+        }
+      }
+    }
+  }
+
+  // Save extracted memories
+  for (const memory of memories) {
+    try {
+      await upsertMemory(
+        userId,
+        memory.category as "preference" | "hobby" | "date" | "goal" | "fact" | "personality" | "topic" | "milestone",
+        memory.key,
+        memory.value,
+        memory.importance
+      );
+    } catch (e) {
+      console.error("Failed to save extracted memory:", e);
+    }
+  }
+
+  if (memories.length > 0) {
+    console.log(`Extracted ${memories.length} memories from conversation`);
   }
 }
